@@ -1,7 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
-
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -15,16 +18,24 @@
         "CMAKE_CXX_EXTENSIONS": "OFF"
       }
     },
-
     {
-      "name": "gcc", "hidden": true, "inherits": "base",
-      "cacheVariables": { "CMAKE_CXX_COMPILER": "g++", "CMAKE_C_COMPILER": "gcc" }
+      "name": "gcc",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_C_COMPILER": "gcc"
+      }
     },
     {
-      "name": "clang", "hidden": true, "inherits": "base",
-      "cacheVariables": { "CMAKE_CXX_COMPILER": "clang++", "CMAKE_C_COMPILER": "clang" }
+      "name": "clang",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang"
+      }
     },
-
     {
       "name": "debug",
       "inherits": "gcc",
@@ -52,9 +63,10 @@
       "inherits": "release",
       "displayName": "nativo — -march=native, só para experimento de ganho por ISA",
       "description": "Números daqui NÃO entram em bench/baseline.json sem novo baseline (ADR-0022).",
-      "cacheVariables": { "MOTOR_RV_ARCH": "native" }
+      "cacheVariables": {
+        "MOTOR_RV_ARCH": "native"
+      }
     },
-
     {
       "name": "asan",
       "inherits": "clang",
@@ -95,32 +107,126 @@
         "MOTOR_RV_ARCH": "x86-64-v2",
         "MOTOR_RV_LTO": "ON"
       }
-    }
-  ],
-
-  "buildPresets": [
-    { "name": "debug",         "configurePreset": "debug" },
-    { "name": "release",       "configurePreset": "release" },
-    { "name": "nativo",        "configurePreset": "nativo" },
-    { "name": "asan",          "configurePreset": "asan" },
-    { "name": "tsan",          "configurePreset": "tsan" },
-    { "name": "fuzz",          "configurePreset": "fuzz" },
-    { "name": "clang-release", "configurePreset": "clang-release" }
-  ],
-
-  "testPresets": [
-    { "name": "debug",   "configurePreset": "debug",   "output": { "outputOnFailure": true } },
-    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
-    { "name": "asan",    "configurePreset": "asan",    "output": { "outputOnFailure": true } },
-    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } },
-    {
-      "name": "tsan-concorrencia", "configurePreset": "tsan",
-      "output": { "outputOnFailure": true },
-      "filter": { "include": { "label": "concorrencia" } }
     },
     {
-      "name": "rapido", "configurePreset": "debug", "output": { "outputOnFailure": true },
-      "filter": { "exclude": { "label": "lento" } }
+      "name": "tidy",
+      "inherits": "clang",
+      "displayName": "tidy — clang-tidy em cada unidade de compilação",
+      "description": "Preset PRÓPRIO porque o clang-tidy analisa a linha de compilação real: com um preset do GCC ele recebe -Wduplicated-cond e amigos, que o front-end do clang não conhece, e reclama do compilador em vez do código.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MOTOR_RV_CLANG_TIDY": "ON",
+        "MOTOR_RV_INVARIANT_ASSERTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "nativo",
+      "configurePreset": "nativo"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz"
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release"
+    },
+    {
+      "name": "tidy",
+      "configurePreset": "tidy"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan-concorrencia",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "filter": {
+        "include": {
+          "label": "concorrencia"
+        }
+      }
+    },
+    {
+      "name": "rapido",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "filter": {
+        "exclude": {
+          "label": "lento"
+        }
+      }
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "nativo",
+      "configurePreset": "nativo",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

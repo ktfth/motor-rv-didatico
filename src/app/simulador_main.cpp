@@ -55,7 +55,7 @@ struct Nucleo {
 };
 
 void uso() {
-  std::puts(
+  (void)std::puts(
       "uso: motor-rv-sim [--dias N] [--negocios N] [--investidores N] [--particoes N]\n"
       "                  [--semente N] [--data AAAAMMDD] [--dados DIR]\n"
       "\n"
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
   // `next() % 0`: SIGFPE, sem mensagem. Um binário de demonstração que morre com sinal em vez de
   // dizer o que está errado ensina a coisa errada sobre o projeto.
   if (!ingress::Partitioner::is_valid_count(cfg.particoes)) {
-    std::fprintf(stderr, "--particoes tem de ser potência de dois entre 1 e 65536 (recebi %u)\n",
+    (void)std::fprintf(stderr, "--particoes tem de ser potência de dois entre 1 e 65536 (recebi %u)\n",
                  cfg.particoes);
     return 2;
   }
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
   for (const Limite& l : {Limite{"--dias", cfg.dias, 1}, Limite{"--negocios", cfg.negocios_por_dia, 1},
                           Limite{"--investidores", cfg.investidores, 1}}) {
     if (l.valor < l.minimo) {
-      std::fprintf(stderr, "%s tem de ser >= %u (recebi %u)\n", l.nome, l.minimo, l.valor);
+      (void)std::fprintf(stderr, "%s tem de ser >= %u (recebi %u)\n", l.nome, l.minimo, l.valor);
       return 2;
     }
   }
@@ -105,26 +105,26 @@ int main(int argc, char** argv) {
   if (!ingress::carrega_instrumentos(dados + "/instrumentos.csv", instrumentos, erro) ||
       !ingress::carrega_calendario(dados + "/calendario-b3-2026.csv", data_inicial, cfg.dias,
                                    calendario, erro)) {
-    std::fprintf(stderr, "motor-rv-sim: %s\n", erro.c_str());
+    (void)std::fprintf(stderr, "motor-rv-sim: %s\n", erro.c_str());
     return 1;
   }
 
-  std::printf("== simulação ==\n");
-  std::printf("  semente      : %" PRIu64 "\n", cfg.semente);
-  std::printf("  instrumentos : %zu (de %s/instrumentos.csv)\n", instrumentos.size(), dados.c_str());
-  std::printf("  pregões      : ");
+  (void)std::printf("== simulação ==\n");
+  (void)std::printf("  semente      : %" PRIu64 "\n", cfg.semente);
+  (void)std::printf("  instrumentos : %zu (de %s/instrumentos.csv)\n", instrumentos.size(), dados.c_str());
+  (void)std::printf("  pregões      : ");
   for (const auto& d : calendario) std::printf("%u→D+2=%u  ", d.data, d.liquidacao_d2);
-  std::printf("\n  investidores : %u em %u partições\n", cfg.investidores, cfg.particoes);
+  (void)std::printf("\n  investidores : %u em %u partições\n", cfg.investidores, cfg.particoes);
 
   std::vector<ingress::EventoRoteado> eventos;
   ingress::gera(cfg, instrumentos, calendario, eventos);
-  std::printf("  eventos      : %zu\n\n", eventos.size());
+  (void)std::printf("  eventos      : %zu\n\n", eventos.size());
 
   std::vector<std::unique_ptr<Nucleo>> nucleos;
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
     auto n = std::make_unique<Nucleo>();
     if (!n->monta(static_cast<uint16_t>(k))) {
-      std::fprintf(stderr, "partição %u não coube na arena\n", k);
+      (void)std::fprintf(stderr, "partição %u não coube na arena\n", k);
       return 1;
     }
     nucleos.push_back(std::move(n));
@@ -148,52 +148,52 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::printf("%-4s %10s %10s %9s %9s %9s %9s %12s\n", "part", "aceitos", "rejeitados", "contas",
+  (void)std::printf("%-4s %10s %10s %9s %9s %9s %9s %12s\n", "part", "aceitos", "rejeitados", "contas",
               "posições", "papéis", "negócios", "publicados");
   uint64_t tot_ok = 0, tot_rej = 0;
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
     const Nucleo& n = *nucleos[k];
-    std::printf("%-4u %10" PRIu64 " %10" PRIu64 " %9u %9u %9u %9u %12" PRIu64 "\n", k,
+    (void)std::printf("%-4u %10" PRIu64 " %10" PRIu64 " %9u %9u %9u %9u %12" PRIu64 "\n", k,
                 n.metricas.apply_accepted, n.metricas.apply_rejected, n.estado.cash.count,
                 n.estado.custody.count, n.estado.instruments.count, n.estado.trades.count,
                 n.loop->published());
     tot_ok += n.metricas.apply_accepted;
     tot_rej += n.metricas.apply_rejected;
   }
-  std::printf("%-4s %10" PRIu64 " %10" PRIu64 "\n\n", "tot", tot_ok, tot_rej);
+  (void)std::printf("%-4s %10" PRIu64 " %10" PRIu64 "\n\n", "tot", tot_ok, tot_rej);
 
   // Por que os rejeitados importam tanto quanto os aceitos: o log é a verdade do que CHEGOU. Uma
   // simulação sem rejeição não exercitaria o caminho que mais quebra no replay.
-  std::printf("== rejeições por motivo ==\n");
+  (void)std::printf("== rejeições por motivo ==\n");
   uint64_t conferencia = 0;
   for (uint32_t c = 0; c < Metrics::kMaxErrCode; ++c) {
     uint64_t soma = 0;
     for (const auto& n : nucleos) soma += n->metricas.rejected_by_code[c];
     if (soma != 0) {
-      std::printf("  %-30s %10" PRIu64 "\n", to_string(static_cast<Err>(c)), soma);
+      (void)std::printf("  %-30s %10" PRIu64 "\n", to_string(static_cast<Err>(c)), soma);
       conferencia += soma;
     }
   }
   // A soma da tabela TEM de bater com o total. Se não bater, algum código escapou do intervalo
   // contabilizado e o relatório está mentindo por omissão.
-  std::printf("  %-30s %10" PRIu64 "%s\n", "(soma da tabela)", conferencia,
+  (void)std::printf("  %-30s %10" PRIu64 "%s\n", "(soma da tabela)", conferencia,
               conferencia == tot_rej ? "" : "   <-- NAO BATE COM O TOTAL");
 
-  std::printf("\n== invariantes, conferidos agora ==\n");
+  (void)std::printf("\n== invariantes, conferidos agora ==\n");
   uint64_t violacoes = 0;
   for (const auto& n : nucleos) {
     for (uint32_t i = 0; i < n->estado.custody.count; ++i) {
       if (!n->estado.custody.buckets_non_negative(i)) ++violacoes;
     }
   }
-  std::printf("  I3  (bucket não negativo)  : %s\n", violacoes == 0 ? "ok" : "VIOLADO");
+  (void)std::printf("  I3  (bucket não negativo)  : %s\n", violacoes == 0 ? "ok" : "VIOLADO");
   uint64_t soma_custodia = 0, soma_caixa = 0;
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
     const uint64_t c = nucleos[k]->estado.custody_checksum();
     const uint64_t x = nucleos[k]->estado.cash_checksum();
     soma_custodia += c;
     soma_caixa += x;
-    std::printf("  partição %u  custódia=%016" PRIx64 "  caixa=%016" PRIx64 "  LSN=%" PRIu64 "\n", k,
+    (void)std::printf("  partição %u  custódia=%016" PRIx64 "  caixa=%016" PRIx64 "  LSN=%" PRIu64 "\n", k,
                 c, x, nucleos[k]->estado.applied_lsn.v);
   }
   // A SOMA atravessa as partições, e é o número mais forte que esta ferramenta imprime.
@@ -203,14 +203,14 @@ int main(int argc, char** argv) {
   // dividido. Logo o total tem de ser o mesmo com 1, 2, 4 ou 8 partições. Se mudar, ou o
   // roteamento por documento deixou de ser função pura, ou algum evento foi aplicado no core
   // errado. É um gate de CI de uma linha para a promessa central de ADR-0005.
-  std::printf("  TOTAL       custódia=%016" PRIx64 "  caixa=%016" PRIx64
+  (void)std::printf("  TOTAL       custódia=%016" PRIx64 "  caixa=%016" PRIx64
               "   (não deve depender de --particoes)\n",
               soma_custodia, soma_caixa);
 
-  std::printf("\n== imagem de recuperação (stall-and-copy) ==\n");
+  (void)std::printf("\n== imagem de recuperação (stall-and-copy) ==\n");
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
     const auto bytes = core::state_image_bytes(nucleos[k]->estado.arena_bytes);
-    std::printf("  partição %u: %.1f MiB de estado\n", k,
+    (void)std::printf("  partição %u: %.1f MiB de estado\n", k,
                 static_cast<double>(bytes) / (1024.0 * 1024.0));
   }
   return violacoes == 0 ? 0 : 1;

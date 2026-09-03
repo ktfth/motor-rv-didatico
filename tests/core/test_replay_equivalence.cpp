@@ -29,8 +29,9 @@ uint32_t impressao(const core::PartitionState& s) {
 
   const uint32_t np = s.custody.count;
   add(s.custody.available, sizeof(Qty) * np);
-  add(s.custody.pending_buy, sizeof(Qty) * np * core::kSettlementSlots);
-  add(s.custody.pending_sell, sizeof(Qty) * np * core::kSettlementSlots);
+  const size_t np_slots = static_cast<size_t>(np) * core::kSettlementSlots;
+  add(s.custody.pending_buy, sizeof(Qty) * np_slots);
+  add(s.custody.pending_sell, sizeof(Qty) * np_slots);
   add(s.custody.overdue_buy, sizeof(Qty) * np);
   add(s.custody.overdue_sell, sizeof(Qty) * np);
   add(s.custody.blocked, sizeof(Qty) * np);
@@ -42,7 +43,7 @@ uint32_t impressao(const core::PartitionState& s) {
 
   const uint32_t na = s.cash.count;
   add(s.cash.cash, sizeof(Money) * na);
-  add(s.cash.pending, sizeof(Money) * na * core::kSettlementSlots);
+  add(s.cash.pending, sizeof(Money) * static_cast<size_t>(na) * core::kSettlementSlots);
   add(s.cash.overdue, sizeof(Money) * na);
   add(s.cash.income_receivable, sizeof(Money) * na);
   add(s.account_document, sizeof(uint64_t) * na);
@@ -50,8 +51,8 @@ uint32_t impressao(const core::PartitionState& s) {
 
   const uint32_t ni = s.instruments.count;
   add(s.instruments.external_id, sizeof(uint32_t) * ni);
-  add(s.instruments.symbol, 12 * ni);
-  add(s.instruments.isin, 12 * ni);
+  add(s.instruments.symbol, size_t{12} * ni);
+  add(s.instruments.isin, size_t{12} * ni);
   add(s.instruments.type, ni);
   add(s.instruments.price_factor, sizeof(uint32_t) * ni);
   add(s.instruments.lot_size, sizeof(uint32_t) * ni);

@@ -62,7 +62,7 @@ inline std::vector<Evento> gera_sessao(uint64_t semente, uint32_t n_negocios) {
   constexpr uint32_t kNInstr = 5;
   for (uint32_t i = 1; i <= kNInstr; ++i) {
     v.push_back(faz(cadastro(i, "TICK", i == kXpto11 ? 1000 : 1,
-                             static_cast<int64_t>(1'000'000'000 + i * 137'000'000), kD0)));
+                             int64_t{1'000'000'000} + int64_t{i} * 137'000'000, kD0)));
   }
 
   const uint64_t docs[] = {kCpfA, kCpfB, 99988877766ULL, 12345678000199ULL};
@@ -71,8 +71,8 @@ inline std::vector<Evento> gera_sessao(uint64_t semente, uint32_t n_negocios) {
     const uint64_t doc = docs[r.below(4)];
     const uint32_t inst = 1 + r.below(kNInstr);
     const bool compra = r.below(100) < 60;
-    const int64_t qty = Qty::from_units(static_cast<int64_t>(1 + r.below(500))).raw();
-    const int64_t preco = 500'000'000 + static_cast<int64_t>(r.below(4'000'000'000u));
+    const int64_t qty = Qty::from_units(int64_t{1} + r.below(500)).raw();
+    const int64_t preco = 500'000'000 + int64_t{r.below(4'000'000'000u)};
     const int64_t custos = static_cast<int64_t>(r.below(100'000));
     // Uma em vinte tem data fora da janela: será rejeitada, e o replay tem de rejeitá-la igual.
     const uint32_t data = (r.below(20) == 0) ? 20261231 : kD2;

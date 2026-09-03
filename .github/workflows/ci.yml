@@ -142,7 +142,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build cmake clang clang-tidy liburing-dev libssl-dev libfmt-dev libzstd-dev \
             libgtest-dev libgmock-dev python3
-      - name: configurar com clang-tidy
-        run: cmake --preset debug -DMOTOR_RV_CLANG_TIDY=ON
+      - name: configurar
+        run: cmake --preset tidy
       - name: analisar
-        run: cmake --build --preset debug
+        run: cmake --build --preset tidy

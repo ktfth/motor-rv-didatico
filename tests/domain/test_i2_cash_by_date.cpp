@@ -50,8 +50,8 @@ TEST(I2, ALiquidarBateComOsNegociosPendentes) {
   for (uint32_t i = 0; i < 200; ++i) {
     const uint64_t doc = docs[r.below(2)];
     const uint32_t inst = 1 + r.below(4);
-    const int64_t qty = Qty::from_units(static_cast<int64_t>(1 + r.below(100))).raw();
-    const int64_t preco = 1'000'000'000 + static_cast<int64_t>(r.below(3'000'000'000u));
+    const int64_t qty = Qty::from_units(int64_t{1} + r.below(100)).raw();
+    const int64_t preco = 1'000'000'000 + int64_t{r.below(3'000'000'000u)};
     const int64_t custos = static_cast<int64_t>(r.below(50'000));
     ASSERT_TRUE(m.aplica(negocio(id++, doc, inst, Side::Buy, qty, preco, custos, kD2)).is_ok());
   }

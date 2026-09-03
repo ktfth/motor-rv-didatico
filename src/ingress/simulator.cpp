@@ -19,7 +19,12 @@ class Lcg {
     s_ = s_ * 6364136223846793005ULL + 1442695040888963407ULL;
     return s_ >> 16;
   }
-  constexpr uint32_t below(uint32_t n) noexcept { return static_cast<uint32_t>(next() % n); }
+  // `n == 0` devolve 0 em vez de dividir por zero. A validação de argumentos do `main` já impede
+  // o caso, mas o analisador estático provou que o caminho existe — e uma função que só é segura
+  // porque quem chama se lembrou de conferir é uma armadilha esperando o segundo chamador.
+  constexpr uint32_t below(uint32_t n) noexcept {
+    return n == 0 ? 0U : static_cast<uint32_t>(next() % n);
+  }
 
  private:
   uint64_t s_;

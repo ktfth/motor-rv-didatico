@@ -32,7 +32,8 @@ Checks: >
   -readability-braces-around-statements,
   -readability-math-missing-parentheses,
   -readability-uppercase-literal-suffix,
-  -cppcoreguidelines-pro-bounds-constant-array-index
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -clang-diagnostic-unknown-warning-option
 
 # Por que os quatro desligados no fim:
 #   pro-bounds-pointer-arithmetic e pro-type-reinterpret-cast: o decodificador SBE e o mmap do
@@ -54,6 +55,10 @@ Checks: >
 #   braces-around-statements e math-missing-parentheses: 431 avisos de estilo, zero defeitos. O
 #     `.clang-format` já governa a forma.
 #   uppercase-literal-suffix e pro-bounds-constant-array-index: idem.
+#
+#   clang-diagnostic-unknown-warning-option: se o clang-tidy for apontado para um build do GCC,
+#     ele lê `-Wduplicated-cond` e amigos e reclama do COMPILADOR, não do código. O preset `tidy`
+#     já usa clang; isto é o cinto sobre o suspensório.
 #
 # O que a primeira execução ACHOU e que valeu por ela toda: duas multiplicações em `uint32`
 # alargadas só depois para `uint64` (transbordo a partir de 429 milhões de elementos, em
