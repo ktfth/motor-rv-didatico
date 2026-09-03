@@ -21,3 +21,17 @@ ADR aceito é imutável (hook). Para mudar uma decisão: ADR novo com 'substitui
 | ADR-0014 | [Snapshot EOD por stall-and-copy; fuzzy por chunks como experimento; fork() descartado](0014-snapshot-stall-and-copy.md) |
 | ADR-0015 | [Criptografia em repouso no dispositivo, não por registro](0015-criptografia-em-repouso-no-dispositivo.md) |
 | ADR-0016 | [Governança de otimização: pré-aprovadas vs. experimentos](0016-governanca-de-otimizacao.md) |
+| ADR-0017 | [Gerador de codecs SBE próprio, em Python, no lugar do `sbe-tool`](0017-gerador-sbe-proprio.md) |
+| ADR-0018 | [Serializador e parser JSON próprios na borda](0018-json-proprio-na-borda.md) |
+| ADR-0019 | [Servidor HTTP próprio sobre io_uring/epoll, no lugar de Asio/Beast](0019-http-proprio-sobre-io-uring.md) |
+| ADR-0020 | [JOSE direto sobre `EVP_*` do OpenSSL, no lugar de jwt-cpp](0020-jose-direto-openssl.md) |
+| ADR-0021 | [Harness de medição próprio que escreve `bench/baseline.json`](0021-harness-de-bench-proprio.md) |
+| ADR-0022 | [Baseline `x86-64-v2`; `-march=native` só em preset opcional](0022-baseline-x86-64-v2.md) |
+| ADR-0023 | [Backend de I/O do WAL plugável (io_uring \| pwrite), escolhido em compilação](0023-backend-de-io-plugavel.md) |
+
+## Nota sobre 0017–0023
+
+Os sete últimos ADRs nasceram do encontro do desenho com a máquina real (`docs/ambiente.md`): cada
+biblioteca que o desenho pressupunha e não existe virou decisão explícita, com alternativa
+considerada e consequência assumida, em vez de improviso dentro do código. Nenhum deles substitui
+ADR anterior; 0019 e 0022 ajustam um ponto de 0008 e da linha de build de `docs/arquitetura.md`.
