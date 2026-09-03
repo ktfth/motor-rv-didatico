@@ -1,0 +1,65 @@
+# Regras do CODING_RULES.md que dá para automatizar. O que não dá, o `verificador` revisa a olho.
+#
+# Filosofia: cada regra ligada aqui aponta para um parágrafo do CODING_RULES. Regra sem motivo
+# escrito é ruído que alguém vai silenciar com NOLINT daqui a três meses.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-avoid-do-while,
+  -misc-include-cleaner,
+  -bugprone-easily-swappable-parameters
+
+# Por que os quatro desligados no fim:
+#   pro-bounds-pointer-arithmetic e pro-type-reinterpret-cast: o decodificador SBE e o mmap do
+#     snapshot vivem de aritmética de ponteiro e de reinterpretação de bytes. É o trabalho deles.
+#   avoid-magic-numbers: tamanhos de bloco e escalas de ponto fixo são constantes nomeadas onde
+#     importa; forçar a regra em teste de golden só produz constante sem sentido.
+#   easily-swappable-parameters: quantidade e preço são ambos int64 por construção (ADR-0007);
+#     a proteção real é o tipo forte Fixed<>, não o aviso.
+
+WarningsAsErrors: 'bugprone-*,cert-*,clang-analyzer-*,concurrency-*,performance-*'
+
+HeaderFilterRegex: '.*/(src|tests|bench)/.*\.(hpp|h)$'
+
+CheckOptions:
+  - key: readability-identifier-naming.NamespaceCase           # identificadores em inglês (CLAUDE.md)
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: CamelCase
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: 'k'
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: 'k'
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: 'Qty;Price;Money;Lsn;AccountId;InstrumentId;DateYmd'   # tipos-valor de 8 bytes

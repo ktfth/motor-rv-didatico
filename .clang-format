@@ -1,0 +1,29 @@
+# Estilo do motor-rv. Um formatador é uma decisão tomada uma vez para nunca mais discutir.
+---
+Language: Cpp
+BasedOnStyle: Google
+Standard: c++20
+ColumnLimit: 100          # 100 cabe dois arquivos lado a lado num monitor comum
+IndentWidth: 2
+AccessModifierOffset: -1
+PointerAlignment: Left    # `int* p`: o asterisco é do tipo, não do nome
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+BreakBeforeBraces: Attach
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<[a-z_]+>$'            # cabeçalhos da std sem extensão
+    Priority: 1
+  - Regex: '^<.*\.h>$'              # C e sistema
+    Priority: 2
+  - Regex: '^<(openssl|liburing|fmt|gtest|gmock|zstd).*'
+    Priority: 3
+  - Regex: '^"motor_rv/.*'          # o projeto por último: o mais específico fica perto do código
+    Priority: 4
+  - Regex: '.*'
+    Priority: 5
+SortIncludes: CaseSensitive
+SpacesBeforeTrailingComments: 2
+AlignTrailingComments: true
+ReflowComments: true

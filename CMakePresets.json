@@ -1,0 +1,124 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF"
+      }
+    },
+
+    {
+      "name": "gcc", "hidden": true, "inherits": "base",
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "g++", "CMAKE_C_COMPILER": "gcc" }
+    },
+    {
+      "name": "clang", "hidden": true, "inherits": "base",
+      "cacheVariables": { "CMAKE_CXX_COMPILER": "clang++", "CMAKE_C_COMPILER": "clang" }
+    },
+
+    {
+      "name": "debug",
+      "inherits": "gcc",
+      "displayName": "debug — asserts de invariante ligados, sem otimização",
+      "description": "Onde os asserts de I1..I12 vivem. Nunca use para medir nada.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MOTOR_RV_INVARIANT_ASSERTS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "gcc",
+      "displayName": "release — baseline oficial (x86-64-v2, LTO)",
+      "description": "O preset que produz os números de bench/baseline.json. ADR-0022.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MOTOR_RV_ARCH": "x86-64-v2",
+        "MOTOR_RV_LTO": "ON",
+        "MOTOR_RV_INVARIANT_ASSERTS": "OFF"
+      }
+    },
+    {
+      "name": "nativo",
+      "inherits": "release",
+      "displayName": "nativo — -march=native, só para experimento de ganho por ISA",
+      "description": "Números daqui NÃO entram em bench/baseline.json sem novo baseline (ADR-0022).",
+      "cacheVariables": { "MOTOR_RV_ARCH": "native" }
+    },
+
+    {
+      "name": "asan",
+      "inherits": "clang",
+      "displayName": "asan+ubsan — memória e comportamento indefinido",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MOTOR_RV_SANITIZER": "address,undefined",
+        "MOTOR_RV_INVARIANT_ASSERTS": "ON"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "clang",
+      "displayName": "tsan — corridas entre ingress, partição e thread de snapshot",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MOTOR_RV_SANITIZER": "thread",
+        "MOTOR_RV_INVARIANT_ASSERTS": "ON"
+      }
+    },
+    {
+      "name": "fuzz",
+      "inherits": "clang",
+      "displayName": "fuzz — libFuzzer nos parsers da borda (HTTP, JWS, JSON)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MOTOR_RV_SANITIZER": "address,undefined,fuzzer-no-link",
+        "MOTOR_RV_FUZZERS": "ON"
+      }
+    },
+    {
+      "name": "clang-release",
+      "inherits": "clang",
+      "displayName": "clang-release — segundo compilador, mesmo baseline",
+      "description": "Dois compiladores discordando é o jeito barato de achar UB.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MOTOR_RV_ARCH": "x86-64-v2",
+        "MOTOR_RV_LTO": "ON"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "debug",         "configurePreset": "debug" },
+    { "name": "release",       "configurePreset": "release" },
+    { "name": "nativo",        "configurePreset": "nativo" },
+    { "name": "asan",          "configurePreset": "asan" },
+    { "name": "tsan",          "configurePreset": "tsan" },
+    { "name": "fuzz",          "configurePreset": "fuzz" },
+    { "name": "clang-release", "configurePreset": "clang-release" }
+  ],
+
+  "testPresets": [
+    { "name": "debug",   "configurePreset": "debug",   "output": { "outputOnFailure": true } },
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "asan",    "configurePreset": "asan",    "output": { "outputOnFailure": true } },
+    {
+      "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true },
+      "filter": { "include": { "label": "concorrencia" } }
+    },
+    {
+      "name": "rapido", "configurePreset": "debug", "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "lento" } }
+    }
+  ]
+}
