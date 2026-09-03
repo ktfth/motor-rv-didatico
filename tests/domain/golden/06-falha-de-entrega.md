@@ -29,9 +29,9 @@ Venda de 50 ações que falha na entrega em 20260910 e é recomprada em 20260911
 | 2 | `Alocado` | `Alocado` | titular fixado |
 | 3 | `LoteCompensado{0910}` | `Compensado` | net financeiro consolidado |
 | 4 | `FalhaEntrega{negocio, 0910}` | `FalhaEntrega` | **`a_liq_venda[0910]` permanece**; marca de falha |
-| 5 | `NegocioExecutado` COMPRA 50 @ R$ 36,10 (recompra) | novo negócio, `Executado` | `a_liq_compra[0913] += 50` |
-| 6 | `LoteCompensado{0913}` liga a recompra à falha | `Compensado` | — |
-| 7 | `Liquidado{0913}` | `Liquidado` | `a_liq_venda[0910] −= 50`; `a_liq_compra[0913] −= 50` |
+| 5 | `NegocioExecutado` COMPRA 50 @ R$ 36,10 (recompra, em 20260911) | novo negócio, `Executado` | `a_liq_compra[0915] += 50` |
+| 6 | `LoteCompensado{0915}` liga a recompra à falha | `Compensado` | — |
+| 7 | `Liquidado{0915}` | `Liquidado` | `a_liq_venda[0910] −= 50`; `a_liq_compra[0915] −= 50` |
 
 ## O bucket que não se mexe (passo 4)
 
@@ -69,3 +69,16 @@ São 6 estados × 10 tipos de evento = 60 combinações; 7 estão no grafo. As 5
 Um grafo escrito em `docs/dominio.md` e uma tabela de transição no código que discordem é o tipo de
 divergência que só aparece em produção — por isso a tabela do código é **gerada** a partir de uma
 única declaração e o teste percorre a declaração inteira.
+
+
+## A data de liquidação não é "hoje + 2"
+
+A recompra do passo 5 acontece na sexta 20260911 e liquida na **terça 20260915**, não no domingo
+20260913. D+2 conta *pregões*, e o calendário de pregões vem de `data/calendario-b3-2026.csv` —
+que é dado de entrada, não aritmética.
+
+Isso não é um detalhe de conveniência: se a data de liquidação fosse calculada dentro do `apply`
+consultando um calendário carregado de arquivo, o replay leria arquivo externo e violaria I12. A
+data de liquidação de cada negócio vem **no evento**, calculada pelo ingress na entrada. O motor a
+usa como índice de bucket e nunca a recalcula. Um feriado descoberto depois muda o arquivo do
+ingress; não muda a história já registrada no log.

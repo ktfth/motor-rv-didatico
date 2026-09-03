@@ -1,0 +1,16 @@
+# Tabela de instrumentos do estudo. Um instrumento por linha; `instrument_id` é o inteiro internado
+# usado dentro do motor (uint32) e nunca aparece fora dele. ISINs são os reais dos papéis citados.
+# `fator_cotacao` é o divisor de `grossAmount` (I7); `lote_padrao` separa lote cheio de fracionário.
+instrument_id,ticker,isin,tipo,fator_cotacao,lote_padrao,descricao
+1,PETR4,BRPETRACNPR6,ACAO,1,100,Petrobras PN
+2,VALE3,BRVALEACNOR0,ACAO,1,100,Vale ON
+3,ITUB4,BRITUBACNPR1,ACAO,1,100,Itaú Unibanco PN
+4,BBAS3,BRBBASACNOR3,ACAO,1,100,Banco do Brasil ON
+5,MGLU3,BRMGLUACNOR2,ACAO,1,100,Magazine Luiza ON
+6,BOVA11,BRBOVACTF001,ETF,1,10,iShares Ibovespa
+7,IVVB11,BRIVVBCTF008,ETF,1,10,iShares S&P 500
+8,HGLG11,BRHGLGCTF003,FII,1,1,CSHG Logística FII
+9,KNRI11,BRKNRICTF000,FII,1,1,Kinea Renda Imobiliária FII
+10,AAPL34,BRAAPLBDR004,BDR,1,1,Apple BDR
+11,MSFT34,BRMSFTBDR002,BDR,1,1,Microsoft BDR
+12,XPTO11,BRXPTOCTF999,FII,1000,1,Instrumento fictício cotado por lote de mil — exercita I7 (cenário 12)
