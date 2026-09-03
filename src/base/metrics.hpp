@@ -81,7 +81,15 @@ class Metrics {
   uint64_t apply_accepted = 0;
   uint64_t apply_rejected = 0;
   uint64_t apply_fatal = 0;
-  uint64_t rejected_by_err[16]{};  // indexado por (código − 200), a faixa de rejeição do domínio
+
+  // Contagem EXATA por código, indexada pelo próprio número do `Err`. A primeira versão indexava
+  // por (código − 200) num vetor de 16, e a simulação mostrou o problema na hora: metade das
+  // rejeições não aparecia no relatório, porque `NotFound` (4) e `ShortPayload` (101) estão fora
+  // daquela faixa. Um relatório de rejeição incompleto é pior que nenhum — ele dá a impressão de
+  // que a lista está fechada. Dois quilobytes por partição resolvem; é o preço de uma linha de
+  // cache por código, uma vez por rejeição.
+  static constexpr uint16_t kMaxErrCode = 512;
+  uint32_t rejected_by_code[kMaxErrCode]{};
 
   // WAL
   uint64_t wal_appends = 0;
@@ -95,10 +103,11 @@ class Metrics {
   // saída
   uint64_t outbox_staged = 0;
   uint64_t outbox_released = 0;
+  uint64_t outbox_full = 0;  // quantas vezes o loop parou por contrapressão da saída
 
   void count_reject(uint16_t err_code) noexcept {
     ++apply_rejected;
-    if (err_code >= 200 && err_code < 216) ++rejected_by_err[err_code - 200];
+    if (err_code < kMaxErrCode) ++rejected_by_code[err_code];
   }
 };
 

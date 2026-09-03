@@ -48,6 +48,22 @@ using namespace rv::codec;
 
 // ---------------------------------------------------------------- utilidades
 
+// Empilha a atualização de uma posição no outbox. É o ÚNICO caminho de saída do núcleo, e é por
+// isso que I10 é verificável: `Outbox::ready(durable)` é um portão, não uma convenção.
+//
+// Falta de espaço aqui é FATAL, não uma saída perdida em silêncio: uma atualização que o evento
+// produziu e que ninguém verá quebraria a promessa de que o read model é função do log.
+[[nodiscard]] Status publica_posicao(PartitionState& s, ApplyContext& ctx, const EventView& ev,
+                                     uint32_t pos) noexcept {
+  if (ctx.outbox == nullptr) return kOk;
+  const PositionUpdate u{s.account_document[s.custody.account[pos]],
+                         s.custody.available[pos].raw(), s.custody.avg_price[pos].raw(),
+                         s.instruments.external_id[s.custody.instrument[pos]], 0};
+  const Status st = ctx.outbox->stage(ev.lsn, OutKind::ReadModelUpdate,
+                                      ByteSpan{reinterpret_cast<const std::byte*>(&u), sizeof u});
+  return st.is_ok() ? kOk : Status::fail(Err::ArenaExhausted, static_cast<uint32_t>(pos));
+}
+
 template <class T>
 [[nodiscard]] Result<const T*> decode(const EventView& ev) noexcept {
   if (ev.len < T::kBlockLength) return Status::fail(Err::ShortPayload, ev.len);
@@ -205,8 +221,7 @@ template <class T>
   (void)s.trade_index.insert_or_get(e.trade_id, t, novo);
 
   RV_CHECK(I3, s.custody.buckets_non_negative(pos), Err::NegativeBucket);
-  (void)ctx;
-  return kOk;
+  return publica_posicao(s, ctx, ev, pos);
 }
 
 // ---------------------------------------------------------------- 3. TradeAllocated
@@ -319,7 +334,7 @@ template <class T>
 // ---------------------------------------------------------------- 5. TradeSettled
 
 [[nodiscard]] Status apply_trade_settled(PartitionState& s, const EventView& ev,
-                                         ApplyContext&) noexcept {
+                                         ApplyContext& ctx) noexcept {
   const auto r = decode<TradeSettled>(ev);
   if (!r) return r.status();
   const TradeSettled& e = **r;
@@ -415,13 +430,13 @@ template <class T>
   }
 
   RV_CHECK(I3, s.custody.buckets_non_negative(pos), Err::NegativeBucket);
-  return kOk;
+  return publica_posicao(s, ctx, ev, pos);
 }
 
 // ---------------------------------------------------------------- 6. CorporateActionApplied
 
 [[nodiscard]] Status apply_corporate_action(PartitionState& s, const EventView& ev,
-                                            ApplyContext&) noexcept {
+                                            ApplyContext& ctx) noexcept {
   const auto r = decode<CorporateActionApplied>(ev);
   if (!r) return r.status();
   const CorporateActionApplied& e = **r;
@@ -531,7 +546,7 @@ template <class T>
   }
 
   RV_CHECK(I3, s.custody.buckets_non_negative(pos), Err::NegativeBucket);
-  return kOk;
+  return publica_posicao(s, ctx, ev, pos);
 }
 
 // ---------------------------------------------------------------- 7. DividendPaid

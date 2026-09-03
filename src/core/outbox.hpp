@@ -22,6 +22,17 @@
 
 namespace rv::core {
 
+// A saída que o núcleo produz para o read model intradiário. Compacta de propósito: ela atravessa
+// o portão de I10 uma vez por evento aceito, e o que sai daqui é o que os canais internos veem.
+struct PositionUpdate {
+  uint64_t document;
+  int64_t available_raw;
+  int64_t avg_price_raw;
+  uint32_t instrument;   // id EXTERNO: quem consome não conhece o slot interno
+  uint32_t reserved;
+};
+static_assert(sizeof(PositionUpdate) == 32);
+
 enum class OutKind : uint8_t {
   ReadModelUpdate = 1,   // atualização do read model intradiário
   PartitionMessage = 2,  // mensagem para outra partição
@@ -53,6 +64,15 @@ class Outbox {
   [[nodiscard]] ByteSpan payload(const OutboxEntry& e) const noexcept {
     return ByteSpan{buf_ + e.offset, e.len};
   }
+
+  // Há espaço para `entries` saídas somando `bytes`? O LOOP pergunta isto ANTES de aplicar um
+  // evento; o `apply` nunca precisa lidar com "não coube".
+  //
+  // A primeira versão não tinha esta função: o `apply` empilhava e, se não coubesse, devolvia
+  // erro fatal. Um teste que aplicava quatrocentos eventos sem drenar mostrou por que está
+  // errado — o outbox cheio é CONTRAPRESSÃO (o consumidor está atrasado), não corrupção. Parar a
+  // partição porque a durabilidade ficou para trás transformaria uma lentidão em indisponibilidade.
+  [[nodiscard]] bool has_room(uint32_t entries, uint32_t bytes) const noexcept;
 
   void commit(uint32_t n) noexcept;  // consome n entradas já publicadas
   void freeze() noexcept { frozen_ = true; }  // após fail-stop: `ready` devolve zero para sempre

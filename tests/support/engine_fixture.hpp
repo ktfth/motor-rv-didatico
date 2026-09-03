@@ -38,8 +38,11 @@ class Engine {
     cap.trades = 8192;
     cap.corporate_actions_per_gen = 1024;
     cap.exceptions = 256;
-    cap.outbox_slots = 256;
-    cap.outbox_payload_bytes = 1 << 16;
+    // O andaime chama `apply` DIRETO, sem o loop da partição — logo, sem a drenagem que o loop
+    // faz a cada volta. A folga aqui é o que evita que um teste longo esbarre na contrapressão
+    // que, no motor de verdade, o loop trata.
+    cap.outbox_slots = 1 << 16;
+    cap.outbox_payload_bytes = 1 << 22;
     EXPECT_TRUE(estado_.init(*arena_, PartitionId{0}, cap));
     EXPECT_TRUE(outbox_.init(*arena_, cap.outbox_slots, cap.outbox_payload_bytes));
     arena_->seal();  // a partir daqui, alocar é erro — é assim que CODING_RULES §1 vira mecanismo

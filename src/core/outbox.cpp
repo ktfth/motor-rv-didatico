@@ -54,6 +54,17 @@ Status Outbox::stage(Lsn lsn, OutKind kind, ByteSpan payload) noexcept {
   return kOk;
 }
 
+bool Outbox::has_room(uint32_t entries, uint32_t bytes) const noexcept {
+  if (count_ + entries > mask_ + 1) return false;
+  if (bytes > buf_cap_) return false;
+  if (count_ == 0) return true;
+  const uint32_t vivo = slots_[head_].offset;
+  // O pior caso é precisar dar a volta: exige `bytes` livres a partir do zero.
+  const uint32_t livre = buf_head_ >= vivo ? (buf_cap_ - buf_head_ > vivo ? buf_cap_ - buf_head_ : vivo)
+                                           : vivo - buf_head_;
+  return livre >= bytes;
+}
+
 uint32_t Outbox::ready(Lsn durable) const noexcept {
   if (frozen_) return 0;
   uint32_t n = 0;

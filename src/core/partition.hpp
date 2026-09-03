@@ -58,6 +58,11 @@ class Partition {
   // uma por lote.
   static constexpr uint32_t kBatch = 256;
 
+  // Quanto um único evento pode produzir de saída. O loop reserva isto ANTES de aplicar, e é essa
+  // reserva que permite ao `apply` empilhar sem nunca tratar "não coube".
+  static constexpr uint32_t kMaxOutputsPerEvent = 4;
+  static constexpr uint32_t kMaxOutputBytesPerEvent = 256;
+
   uint32_t poll(uint64_t now_ns) noexcept {
     uint32_t aplicados = 0;
 
@@ -65,6 +70,14 @@ class Partition {
       while (aplicados < kBatch) {
         const IngressFrame* f = entrada_.peek();
         if (f == nullptr) break;
+
+        // Contrapressão do outbox: se a durabilidade está atrasada e a fila de saída encheu, o
+        // loop PARA de consumir. Nada é perdido, nada é aplicado pela metade — o evento continua
+        // no ring e volta na próxima volta, exatamente como no caso de `WalFull`.
+        if (!saida_.has_room(kMaxOutputsPerEvent, kMaxOutputBytesPerEvent)) {
+          ++metricas_.outbox_full;
+          break;
+        }
 
         // `append` ANTES de `apply`: o log é a verdade do que CHEGOU, não do que foi aceito.
         const auto a = diario_.append(f->tmpl, f->bytes(), f->arrival_ts_ns);
