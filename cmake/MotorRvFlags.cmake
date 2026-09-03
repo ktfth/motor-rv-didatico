@@ -59,10 +59,20 @@ elseif(MOTOR_RV_ARCH)
   target_compile_options(motor_rv_hot INTERFACE -march=${MOTOR_RV_ARCH})
 endif()
 
+# `MOTOR_RV_SANITIZER` é uma LISTA ("address,undefined"), e a vírgula separa argumentos de
+# generator expression: `$<BOOL:address,undefined>` é erro de sintaxe. Por isso a condição é
+# reduzida a um booleano simples AQUI, fora da expressão. Custou um `cmake --preset asan` para
+# descobrir — e é a razão de os presets serem todos exercitados, não só o `debug`.
+if(MOTOR_RV_SANITIZER)
+  set(_sem_sanitizer 0)
+else()
+  set(_sem_sanitizer 1)
+endif()
+
 target_compile_options(motor_rv_hot INTERFACE
   $<$<CONFIG:Release>:-O3>
-  # CODING_RULES §4: sem exceções no hot path. Fora dos sanitizers, onde o runtime precisa delas.
-  $<$<AND:$<NOT:$<BOOL:${MOTOR_RV_SANITIZER}>>,$<CONFIG:Release>>:-fno-exceptions>
+  # CODING_RULES §4: sem exceções no hot path. Fora dos sanitizers, cujo runtime precisa delas.
+  $<$<AND:$<BOOL:${_sem_sanitizer}>,$<CONFIG:Release>>:-fno-exceptions>
 )
 
 if(MOTOR_RV_LTO)

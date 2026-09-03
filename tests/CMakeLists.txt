@@ -1,0 +1,5 @@
+if(NOT TARGET GTest::gtest)
+  message(STATUS "motor-rv: GoogleTest ausente — testes desligados")
+  return()
+endif()
+add_subdirectory(domain)
