@@ -33,7 +33,8 @@ Checks: >
   -readability-math-missing-parentheses,
   -readability-uppercase-literal-suffix,
   -cppcoreguidelines-pro-bounds-constant-array-index,
-  -clang-diagnostic-unknown-warning-option
+  -clang-diagnostic-unknown-warning-option,
+  -modernize-use-std-print
 
 # Por que os quatro desligados no fim:
 #   pro-bounds-pointer-arithmetic e pro-type-reinterpret-cast: o decodificador SBE e o mmap do
@@ -56,6 +57,12 @@ Checks: >
 #     `.clang-format` já governa a forma.
 #   uppercase-literal-suffix e pro-bounds-constant-array-index: idem.
 #
+#   modernize-use-std-print: o check CRASHA. Analisando `printf` com as macros de `<cinttypes>`
+#     (`PRIu64`, `PRIx64`), o `FormatStringConverter` do clang-tidy 18 e do 20 aborta com "PLEASE
+#     submit a bug report" em `src/app/simulador_main.cpp`. Desligar um check que derruba a
+#     ferramenta é a única saída que não esconde o arquivo inteiro da análise — que seria o preço
+#     de excluí-lo do build. A sugestão em si é boa e vale revisitar quando `std::print` estiver
+#     disponível nos dois compiladores do projeto; até lá, `fmt` já está linkado e resolve.
 #   clang-diagnostic-unknown-warning-option: se o clang-tidy for apontado para um build do GCC,
 #     ele lê `-Wduplicated-cond` e amigos e reclama do COMPILADOR, não do código. O preset `tidy`
 #     já usa clang; isto é o cinto sobre o suspensório.
