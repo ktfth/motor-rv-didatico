@@ -10,3 +10,8 @@ motor_rv_test(test_apply_golden
   FONTES  test_apply_golden.cpp
   LIGA    rv::core
   ROTULOS "I1;I3;I4;I5;I6;I13;dominio;golden")
+
+motor_rv_test(test_i2_cash_by_date
+  FONTES  test_i2_cash_by_date.cpp
+  LIGA    rv::core
+  ROTULOS "I2;I5;dominio")

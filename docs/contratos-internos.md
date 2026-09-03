@@ -1924,3 +1924,987 @@ o `rename` da imagem e a escrita do manifesto, ninguém sabe qual usar — e a i
 **`recover` escolhe**: a mais recente cujo CRC de cabeçalho **e de todas as seções** valide, caindo
 para a anterior se falhar, e reporta em `RecoveryReport` qual usou e quantos LSNs a mais foram
 replicados por causa do fallback.
+
+### 3.8 Outbox e a regra de liberação
+
+```cpp
+// src/core/outbox.hpp
+namespace rv::core {
+
+enum class OutKind : uint8_t { ReadModelUpdate = 1, Confirmation = 2, Rejection = 3,
+                               Audit = 4, EodDone = 5 };
+
+inline constexpr uint16_t kOutboxPayloadMax  = 96;
+inline constexpr uint16_t kMaxOutboxPerEvent = 4;   // PIOR CASO de um handler; contrato, não palpite
+
+struct alignas(16) OutboxEntry {
+  Lsn       gate_lsn;    // liberado somente quando durable_lsn >= gate_lsn (I10)
+  uint64_t  seq;         // monotônico por partição: (partition, seq) é a chave de deduplicação
+  uint16_t  len;
+  OutKind   kind;
+  uint8_t   _pad[5];
+  std::byte payload[kOutboxPayloadMax];
+};
+static_assert(sizeof(OutboxEntry) == 128);
+
+class Outbox {
+ public:
+  void init(Arena&, uint32_t capacity_pow2) noexcept;            // warm-up
+
+  // --- escrita, de dentro do apply ---
+  [[nodiscard]] bool       has_room(uint16_t records) const noexcept;
+  [[nodiscard]] std::byte* begin_record(OutKind, uint16_t len) noexcept;   // nullptr = cheio
+  void                     end_record(Lsn gate) noexcept;
+
+  // --- liberação, do loop da partição ---
+  template <class Sink> uint32_t release_upto(Lsn durable, Sink& sink) noexcept;
+
+  void freeze() noexcept;                     // após fail-stop: nada mais sai, para sempre
+  [[nodiscard]] uint32_t pending() const noexcept;
+  [[nodiscard]] uint64_t next_seq() const noexcept;   // vai para a imagem de recuperação
+
+  static Outbox& null() noexcept;             // usado pela recuperação: descarta tudo
+};
+
+template <class S> concept OutboxSink = requires(S s, const OutboxEntry& e) {
+  { s(e) } noexcept -> std::same_as<bool>;    // false = contrapressão: para e retoma na próxima volta
+};
+}
+```
+
+**A regra de liberação (I10), como contrato:**
+
+1. Um registro só sai quando `gate_lsn <= durable_lsn`. `release_upto` faz `RV_CHECK` dessa
+   condição **em release**, não só em debug: é a única barreira entre um crash e uma confirmação
+   mentirosa. Não existe outro caminho de saída do núcleo — nem log, nem métrica com conteúdo de
+   negócio, nem escrita direta em ring de saída. É por isso que I10 é verificável: há **um** portão.
+2. `gate_lsn` é não-decrescente ao longo do anel, porque `apply` roda em ordem de LSN e só escreve
+   registros do evento corrente. A liberação é um caminhar de cursor, sem ordenação e sem busca.
+3. Contrapressão do sink **para** a liberação; nunca descarta, nunca reordena.
+4. `freeze()` é absorvente e vale para a partição inteira.
+
+**Outbox cheio é contrapressão, não fail-stop.** A regra antiga — "[`stage`] falha só por falta de
+espaço, e isso é fatal" — derrubava a partição por lentidão de dispositivo: uma latência transitória
+do NVMe segura `durable_lsn`, `ready(durable)` para de drenar, o outbox enche em milissegundos de
+tráfego, e o próximo `stage` **dentro do apply** dispara fail-stop com o ledger meio-mutado —
+contrariando a atomicidade que D8 e o golden 06 exigem. A correção é mover a decisão para antes de
+qualquer mutação: o laço faz `if (!out_.has_room(kMaxOutboxPerEvent)) break;` **antes** do
+`append`/`apply` (§3.9). `kMaxOutboxPerEvent` é constante do contrato — o pior caso de um handler —
+e é feio que o loop precise saber disso, mas é o que mantém `apply` all-or-nothing sem rollback.
+
+**A entrega é AO MENOS UMA VEZ. A deduplicação é do consumidor, pela chave `(partition, seq)`.**
+O outbox **não é persistido**: seu conteúdo é função pura do prefixo do log, então a recuperação o
+reconstruiria aplicando os mesmos eventos. Tudo que já saiu tinha `gate_lsn <= durable_lsn`, logo
+está no log durável, logo seria regenerado. O desenho anterior descrevia a semântica só pelo lado da
+perda ("um crash perde exatamente o que nunca foi externalizado") e nunca pelo lado do excesso — e
+sem chave de deduplicação, toda recuperação duplicaria registros de auditoria de R19, que é artefato
+regulatório onde duplicata é achado. Na v1 o replay usa `Outbox::null()` (§3.7), então nada é
+reemitido; `seq` existe assim mesmo, e o `next_seq` corrente vai para a imagem de recuperação, para
+que o replay reproduza os mesmos números e um consumidor futuro possa deduplicar sem ambiguidade.
+
+**Por que o sink é template e não `std::function`.** `std::function` é uma alocação e uma chamada
+indireta, e a liberação roda a cada volta do loop, inclusive quando há um único registro. Com
+template, um sink que enfileira em um ring é inlinado até virar dois stores.
+
+### 3.9 O loop da partição e o ciclo de EOD
+
+```cpp
+// src/base/spsc_ring.hpp — a única estrutura com atomics do projeto (CODING_RULES §5)
+namespace rv {
+template <class T, uint32_t kSlots>            // kSlots é potência de dois
+class SpscRing {
+ public:
+  // produtor (thread de ingress)
+  [[nodiscard]] T*   try_claim() noexcept;     // nullptr = cheio
+  void               publish() noexcept;       // um store release no cursor do produtor
+  // consumidor (thread da partição) — drenagem em LOTE, como manda ADR-0016
+  struct DrainView { const T* a; uint32_t na; const T* b; uint32_t nb; };  // cobre o wrap
+  [[nodiscard]] DrainView begin_drain(uint32_t max) noexcept;   // uma leitura do cursor oposto
+  void                    end_drain(const DrainView&) noexcept; // UM store no cursor do consumidor
+ private:
+  alignas(64) std::atomic<uint64_t> head_;     // cursores em cache lines separadas
+  alignas(64) std::atomic<uint64_t> tail_;
+  alignas(64) uint64_t cached_head_, cached_tail_;   // cursor oposto cacheado
+  alignas(64) T slots_[kSlots];
+};
+}
+```
+
+**Por que `begin_drain`/`end_drain` e não `peek`/`pop`.** ADR-0016 pré-aprova "drenagem em lote", e
+`peek`/`pop` um a um **não** a entrega: cada `pop` faz um store de release no cursor do consumidor,
+e com o produtor consultando esse mesmo cursor para saber o espaço livre, são 256 invalidações de
+linha de cache por lote de 256 eventos, onde o desenho promete uma. É um custo que nenhum teste
+funcional vê — só o bench, depois de o código estar escrito por dois agentes diferentes. Por isso
+`base/spsc_ring.hpp` é **arquivo de barreira da Onda 0**, com a assinatura completa: era a única
+estrutura do hot path sem contrato neste documento.
+
+```cpp
+// src/core/partition.hpp
+namespace rv::core {
+
+inline constexpr uint32_t kMaxIngressPayload = 496;
+struct alignas(64) IngressFrame {
+  uint64_t  arrival_ts_ns;
+  uint16_t  tmpl;
+  uint16_t  len;
+  uint32_t  _pad;
+  std::byte payload[kMaxIngressPayload];       // maior evento: CustodyReconciled cheio = 420 B
+  [[nodiscard]] ByteSpan bytes() const noexcept;
+};
+static_assert(sizeof(IngressFrame) == 512);
+using Inbox = SpscRing<IngressFrame, 4096>;
+
+template <Journal J>
+class Partition {
+ public:
+  Partition(PartitionState&, J&, Inbox&, Outbox&, Metrics&) noexcept;
+
+  // Uma volta do loop. O `while (true)` mora em app/motor_main.cpp — por isso isto é testável.
+  uint32_t poll(uint64_t now_ns) noexcept;
+  // Uma volta que NÃO consome o inbox: só submete, colhe e publica. É o que o EOD usa.
+  uint32_t drain_only(uint64_t now_ns) noexcept;
+
+  // --- ciclo de EOD (§3.3: EodMarked é o único evento produzido pela partição) ---
+  [[nodiscard]] Status seal_day(DateYmd, uint32_t flags) noexcept;  // append+apply EodMarked; frozen_at = lsn
+  [[nodiscard]] Lsn    frozen_at() const noexcept;
+  void                 resume_day() noexcept;                       // frozen_at = 0
+
+  [[nodiscard]] bool halted() const noexcept;
+  [[nodiscard]] Lsn  applied_lsn() const noexcept;
+
+ private:
+  static constexpr uint32_t kMaxBatch = 256;
+};
+
+template <Journal J>
+uint32_t Partition<J>::poll(uint64_t now_ns) noexcept {
+  uint32_t applied = 0;
+  if (!halted_ && state_.frozen_at.v == 0) {          // dia selado ⇒ não consome mais nada
+    auto view = inbox_.begin_drain(kMaxBatch);        // UMA leitura do cursor do produtor
+    for (const IngressFrame* f : view) {
+      if (!out_.has_room(kMaxOutboxPerEvent)) break;  // pré-voo: contrapressão ANTES de mutar
+      auto a = journal_.append(f->tmpl, f->bytes(), f->arrival_ts_ns);
+      if (!a) break;                                  // WalFull: tenta na próxima volta
+      const EventView ev{a->lsn, f->arrival_ts_ns, a->payload.data(), f->tmpl, f->len, 0};
+      const Status st = apply(state_, ev, ctx_);
+      if (classify(st) == ApplyClass::Fatal) { fail_stop_(st, a->lsn); break; }
+      metrics_.count_apply(st);
+      ++applied;
+    }
+    inbox_.end_drain(view, applied);                  // UM store no cursor do consumidor
+  }
+  (void)journal_.maybe_submit(now_ns);
+  (void)journal_.reap();
+  publish_(journal_.durable_lsn());
+  return applied;
+}
+}
+```
+
+**Por que `poll(now_ns)` em vez de `run()`.** O relógio entra como parâmetro, uma vez, no lugar mais
+raso possível — e nunca cruza a fronteira de `apply`. O teste chama `poll` com o tempo que quiser,
+na ordem que quiser, e o replay não o chama de forma alguma. É a mesma função nos três regimes.
+
+**A sequência de EOD, no contrato e não no aplicativo.** `docs/wal.md` e ADR-0014 exigem "snapshot
+exatamente em `eod_lsn`", e o desenho anterior não tinha **nenhuma** assinatura que congelasse a
+partição num LSN: `poll()` era indivisível, e a mesma chamada que avançava `durable_lsn` também
+consumia o inbox. Não havia como esperar `durable_lsn ≥ eod_lsn` sem continuar aplicando eventos
+além dele. Concretamente: `EodMarked` sai com LSN 1000, o laço `while (durable < 1000) poll()`
+consome um `ClosingPriceSet` atrasado como LSN 1001 e o aplica, e o stall-and-copy copia arenas que
+já contêm o efeito de 1001 gravando `state_lsn = 1000`. Na recuperação seguinte o replay parte de
+1001 e **reaplica** o evento — se for um `TradeExecuted`, `disponivel -= 50` acontece duas vezes e
+I1/I13 quebram permanentemente. A sequência correta é:
+
+```cpp
+// app/motor_main.cpp — o EOD inteiro
+RV_TRY(part.seal_day(D, recon_flags));                     // append + apply EodMarked; frozen_at = lsn
+const Lsn at = part.frozen_at();
+RV_TRY(wal.force_commit(now()));
+RV_TRY(wal.await_durable(at, now() + kEodDeadlineNs));     // com PRAZO: vencer é fail-stop
+RV_TRY(wal.snapshot(state, at));                           // stall-and-copy exato em `at`
+part.resume_day();
+```
+
+`poll()` recusa consumir enquanto `frozen_at != 0`; `drain_only()` continua submetendo e colhendo.
+O laço fecha com o teste que amarra as duas pontas:
+`ExposureHeader.custody_checksum == EodMarked{D}.custody_checksum` e
+`ExposureHeader.base_date == EodMarked{D}.date` (§6.2, R14) — o detector já existia no desenho
+anterior e nenhum teste o usava.
+
+**`state_digest` — a relação de igualdade que I11 não tinha.**
+
+```cpp
+// src/core/fingerprint.hpp
+namespace rv::core {
+[[nodiscard]] uint64_t state_digest(const PartitionState&) noexcept;  // CRC encadeado, ordem de slot
+void canonical_dump(const PartitionState&, DumpSink&) noexcept;       // lento, ordenado, para explicar
+}
+```
+
+I11 era a única linha da tabela de invariantes sem ponto de verificação ("é propriedade do
+conjunto"), e a única âncora oferecida eram dois somatórios — que são **cegos** a qualquer erro que
+preserve o total: creditar as 50 ações do golden 06 na conta B em vez da conta A dá o mesmo
+`custody_checksum`; a divergência de 2 ações do golden 14 some se outra conta da partição tiver 2 a
+mais; uma troca de `avg_price` entre dois instrumentos não entra em checksum nenhum. `ctest -L I11`
+ficaria verde enquanto o defeito que I11 existe para pegar está em produção.
+
+`state_digest` é um CRC encadeado sobre as seções canônicas em **ordem de slot fixa**, sensível a
+posição (conta × instrumento × bucket) — o que só é bem definido porque D4 fixa a ordem de iteração
+e porque `state_layout.hpp` exige `has_unique_object_representations_v` em cada coluna. Ele é
+gravado em `EodMarked.state_digest` **antes** de o próprio evento ser aplicado; o replay recomputa e
+compara, e um replay que divergiu falha `Err::StateDigestMismatch` **no evento exato**, não em algum
+lugar do dia. `canonical_dump` e `tools/replay_check` existem para o passo seguinte: explicar
+*onde*, quando o digest já disse *quando*.
+
+### 3.10 Snapshot de exposição — a única janela
+
+```cpp
+// src/wal/snapshot_format.hpp   (FOLHA — a borda inclui isto e mais nada do núcleo)
+#include "base/hash.hpp"        // mix64 mora em base/, e é a MESMA que o ingress usa (§2)
+
+namespace rv::wal {
+
+inline constexpr uint32_t kExposureMagic       = 0x53565231u;   // "1RVS"
+inline constexpr uint16_t kExposureVersion     = 1;
+inline constexpr uint32_t kExposureHeaderBytes = 4096;
+inline constexpr uint32_t kDefaultPageSize     = 25;            // page-size default da API RV
+
+// Uma ideia só: TODA seção é um array tipado (ou um blob). Um acessor serve para tudo.
+enum class Section : uint8_t {
+  InstrumentSymbol = 0, InstrumentIsin, InstrumentType, InstrumentPriceFactor,
+  InstrumentLotSize, InstrumentClosingPrice,
+  AccountSlot,
+  PositionRow, PositionInstrument, PositionAccountSlot,
+  PositionAvailable, PositionBlocked, PositionLeftovers,
+  PositionPendingBuyTotal, PositionPendingSellTotal, PositionOverdueBuy, PositionOverdueSell,
+  PositionAvgPrice, PositionQuantity, PositionGrossAmount,
+  PositionInvestmentId, InvestmentSlot,
+  MovementRow, MovementRecord,
+  BrokerNoteId, BrokerNoteBlob,
+  MonthlySegment,
+  ExceptionRecord,
+  BodyInvestmentRef, BodyBalancesRef, BodyListPage, BodyMovementsPage, BodyItem, BodyBytes,
+  Count
+};
+
+struct SectionRef { uint64_t offset, len; uint32_t elem_size, count, crc32c, reserved; };
+static_assert(sizeof(SectionRef) == 32);
+
+struct ExposureHeader {
+  uint32_t   magic;  uint16_t format_version;  uint16_t partition_id;
+  uint16_t   partition_count;        // rs_main confere contra a sua configuração
+  uint16_t   revision;               // MONOTÔNICO por base_date (ADR-0003: "data E número de versão")
+  uint32_t   base_date;              // == EodMarked.date — a data cujo FECHAMENTO está aqui
+  uint32_t   current_window_from;    // janela de R12 (D-6..D) como FATO do arquivo
+  uint32_t   current_window_to;
+  uint64_t   snapshot_lsn;           // == frozen_at
+  uint64_t   state_digest;           // == EodMarked.state_digest — fecha a cadeia log→estado→exposição
+  uint64_t   custody_checksum;       // idênticos aos de EodMarked{base_date}
+  uint64_t   cash_checksum;
+  uint32_t   engine_build_id;
+  uint64_t   created_ts_ns;
+  uint64_t   file_bytes;
+  uint32_t   block_size;  uint8_t block_size_origin;  uint8_t flags;  uint16_t section_count;
+  uint32_t   account_slot_mask;      // capacidade − 1 (potência de 2)
+  uint32_t   investment_slot_mask;
+  SectionRef sections[static_cast<size_t>(Section::Count)];
+  uint8_t    reserved[/* até 4092 */];
+  uint32_t   header_crc32c;          // últimos quatro bytes
+};
+static_assert(sizeof(ExposureHeader) == kExposureHeaderBytes);
+// flags: bit0 = houve divergência de reconciliação (marca o snapshot, não bloqueia o EOD)
+
+struct AccountSlot    { uint64_t document; uint32_t index; uint32_t reserved; };  // document==0 ⇒ vazio
+struct InvestmentSlot { InvestmentId id;   uint32_t position; uint32_t reserved; };
+struct MonthlySegmentRef { uint32_t yyyymm; uint32_t crc32c; char path[120]; };
+static_assert(sizeof(MonthlySegmentRef) == 128);
+
+struct MovementRecord {
+  uint64_t movement_id; uint64_t broker_note_id;
+  int64_t  qty_raw; int64_t price_raw; int64_t amount_raw;
+  int64_t  costs_raw;          // corretagem + emolumentos + taxa de liquidação
+  int64_t  withheld_tax_raw;   // golden 10: o IRRF do JCP "fica registrado no movimento"
+  uint32_t instrument; uint32_t date;
+  uint8_t  type; uint8_t side; uint16_t flags;
+  uint32_t reserved;
+};
+static_assert(sizeof(MovementRecord) == 80);   // passou de 64 de propósito: ver a nota abaixo
+struct BlobRef { uint64_t offset; uint32_t len; uint32_t crc32c; };
+
+class SnapshotView {
+ public:
+  static Result<SnapshotView> open(const char* path) noexcept;   // mmap MAP_POPULATE|MADV_HUGEPAGE + CRC
+  void close() noexcept;
+
+  [[nodiscard]] const ExposureHeader& header() const noexcept;
+  template <class T> [[nodiscard]] std::span<const T> array(Section) const noexcept;  // checa elem_size
+  [[nodiscard]] std::span<const std::byte> blob(Section, BlobRef) const noexcept;
+
+  [[nodiscard]] std::optional<uint32_t> find_account(DocumentId) const noexcept;
+  // TITULARIDADE NO TIPO: não existe lookup por investmentId sem a conta (§3.11).
+  [[nodiscard]] std::optional<uint32_t> find_position(uint32_t account_slot, InvestmentId) const noexcept;
+  [[nodiscard]] std::span<const uint32_t> positions_of(uint32_t account_slot) const noexcept;   // CSR
+  [[nodiscard]] std::span<const MovementRecord> movements_of(uint32_t position_slot) const noexcept; // CSR
+  [[nodiscard]] std::optional<uint32_t> find_broker_note(uint64_t) const noexcept;
+  [[nodiscard]] std::span<const MonthlySegmentRef> monthly_segments() const noexcept;
+
+  [[nodiscard]] std::span<const std::byte> body_investment(uint32_t position_slot) const noexcept;
+  [[nodiscard]] std::span<const std::byte> body_balances(uint32_t position_slot) const noexcept;
+  [[nodiscard]] std::span<const std::byte> body_list_page(uint32_t account_slot, uint32_t page) const noexcept;
+  [[nodiscard]] std::span<const std::byte> body_item(uint32_t row) const noexcept;
+};
+}  // namespace rv::wal
+```
+
+**Por que "toda seção é um array tipado".** Instrumentos em SoA, posições em CSR, movimentos em CSR,
+blobs JSON — quatro estruturas viram **um** conceito: `array<T>(Section)`. O leitor tem um acessor,
+uma checagem (`sizeof(T) == elem_size`) e um CRC por seção. Foi a troca que mais reduziu conceitos
+no documento inteiro. **Só offsets, nunca ponteiros:** o arquivo é mapeado em endereços diferentes
+em cada processo e a cada troca de versão.
+
+**Os buckets por data viram escalares na exposição — e isso desacopla dois formatos.** A borda nunca
+precisou da dimensão data: para responder `quantity` e a posição pendente ela precisa de **somas**.
+Publicar `PendingByDate[kSettlementHorizon]` acoplava o formato do snapshot — folha congelada,
+versionada, compartilhada com `edge` — ao horizonte de liquidação do núcleo, de modo que qualquer
+mexida no anel de datas viraria bump de `kExposureVersion` com revisão cruzada de `persistencia` +
+`verificador` e três frentes reabertas. Com `PositionPendingBuyTotal`, `PositionPendingSellTotal`,
+`PositionOverdueBuy` e `PositionOverdueSell` como colunas escalares, mudar D+2 para D+1 deixa de ser
+mudança de formato, **e a falha de entrega vira campo visível** em vez de bucket colidido.
+
+**`PositionQuantity` existe, e é I1 — declarado, não deduzido.** Com a correção C1 existem duas
+somas legítimas e diferentes sobre os mesmos buckets, e um snapshot com seis colunas de quantidade
+não dizia qual delas é o `quantity` da API nem qual entra em `grossAmount`. Com os números da própria
+`docs/invariantes.md` (137 iniciais, compra de 100 e venda de 50, ambas pendentes): `disponivel` =
+87, I1 = 137, I13 = 187 — **três** respostas para o mesmo campo, e a R$ 35,00 a diferença entre a
+leitura ingênua e a correta é de R$ 1.750,00 em uma única posição.
+
+**Decisão normativa, escrita como comentário em `expose/gross_amount.hpp`:** o `quantity` exposto e a
+base de `grossAmount` são a identidade **I1** — `disponivel + Σ a_liquidar_venda + bloqueado +
+sobras` — porque é o que a depositária guarda e é contra o extrato da depositária que o investidor
+confere. A projeção de I13 é outro campo, se um dia for exposta. O golden 12 fixa `qty = 137
+unidades` sem dizer de quais buckets vieram os 137, então o teste de I7 passaria mesmo com o bucket
+errado: o golden 12 ganha uma linha mostrando a origem, e `test_i7_gross_amount_golden.cpp` a afirma.
+
+**`PositionGrossAmount` já vem calculado.** `grossAmount = quantity × closingPrice / priceFactor`
+(I7) é calculado **uma vez**, no construtor do snapshot, por `expose/gross_amount.hpp`. A borda não
+faz aritmética de dinheiro — copia bytes. I7 vira um golden test do construtor e R10 um contract test
+de schema. Se a borda pudesse calcular, haveria dois lugares para errar.
+
+**`base_date` é `EodMarked.date`, não `DayOpened.prev_business_date`.** O snapshot é construído no
+EOD do dia D, depois dos `ClosingPriceSet{date=D}` e do `EodMarked{date=D}`, a partir do estado em
+`frozen_at`: ele contém as posições e o fechamento de **D**. Rotulá-lo com `prev_business_date` erra
+um pregão — e o próprio cabeçalho se contradizia, porque `custody_checksum` era declarado "idêntico
+ao de `EodMarked`", que é de D. Pior que o rótulo é a **colisão de publicação**: o caminho é
+`snapshot/p{k}/{data}/v{n}` e a regra de `docs/wal.md` é "correção da B3 na manhã seguinte →
+`v{n+1}` para a mesma data". No EOD de quinta 2026-09-10 o motor publicaria
+`snapshot/p0/20260909/v2`, mas `v1` daquela data já fora publicado no EOD de 09/09 com o conteúdo
+daquele dia: o resource server, que escolhe a maior versão de uma data, passaria a servir o
+conteúdo de 10/09 acreditando ser uma **correção** de 09/09, e o conteúdo de 09/09 ficaria
+inalcançável. A regra "se o EOD de D atrasa, o RS continua em D-2" (ADR-0003) deixaria de funcionar,
+porque não haveria como distinguir atraso de correção. Com o calendário real, `DayOpened{20260908}`
+tem `prev_business_date = 20260904` (07/09 é Independência): o snapshot de 08/09 sairia rotulado
+quatro dias de calendário atrás.
+
+**"D-1" é uma relação entre `base_date` e o dia em que o RS serve, não um campo do arquivo.** O
+campo tem de dizer a que dia o conteúdo pertence, senão nada no arquivo identifica o conteúdo. O
+teste `test_r14_d1_only` deixa de afirmar `base_date == prev_business_date` — que afirmava o erro —
+e passa a afirmar três coisas: `base_date == EodMarked{D}.date`,
+`header.custody_checksum == EodMarked{D}.custody_checksum`, e `base_date <` data corrente em São
+Paulo no momento da publicação.
+
+**`revision`, que ADR-0003 exige e o cabeçalho não tinha.** ADR-0003 decide "versionado por data
+**e número de versão**"; `format_version` é a versão do *formato*, não do dado. Sem `revision`, dois
+arquivos com `base_date = 20260904` (o segundo depois de uma correção da B3) não têm campo que os
+ordene — comparar `created_ts_ns` de arquivos escritos por partições diferentes não é ordem de
+revisão — e a auditoria de R19 não consegue dizer qual revisão respondeu à requisição contestada,
+que é justamente a pergunta que uma contestação faz. `revision` é monotônico por `base_date`,
+replicado no manifesto, e gravado no registro de auditoria de cada resposta ao lado de
+`snapshot_lsn`.
+
+**`MonthlySegment` — a fonte de dados de R11, que não existia.** A tabela de requisitos dizia que
+`/transactions` é servido "sobre segmentos mensais referenciados no cabeçalho", e não havia campo
+nenhum assim: o snapshot só tem a janela de 7 dias de R12, e `expose/` lê a imagem de recuperação,
+que é **estado**, não histórico. `MonthlySegmentRef{yyyymm, crc32c, path[120]}` é o que ADR-0003 já
+decidiu ("histórico de movimentos fica em segmentos mensais, não no snapshot diário"), escrito.
+Quem os produz é `expose/monthly_segments.cpp`, a partir dos movimentos do dia, acumulando por mês;
+o CRC por segmento é o que permite à borda recusar um arquivo trocado. Um snapshot que crescesse com
+o passado deixaria de caber no `MAP_POPULATE` e o custo de EOD viraria linear na história.
+
+**Movimentos indexados por LINHA DE POSIÇÃO, não por conta.** Os dois endpoints de movimentação são
+por investimento (`/investments/{id}/transactions` e `.../transactions-current`), e um CSR por conta
+obrigaria o handler a varrer todos os movimentos da conta filtrando por instrumento a cada
+requisição: uma conta com 5.000 movimentos em 40 instrumentos pagaria O(total) para devolver a
+página 17 de um papel. A promessa de "zero aritmética" e o P95 de R17 morreriam juntos. Com
+`MovementRow` em CSR por `position_slot` e os registros já ordenados por data dentro do intervalo, o
+filtro de janela é **duas buscas binárias** e a paginação volta a ser recorte.
+
+**`MovementRecord` passou de 64 para 80 bytes, de propósito.** O golden 10 diz textualmente que o
+IRRF de R$ 1,74 do JCP "fica registrado no movimento para a apuração anual"; sem campo, `/transactions`
+não conseguiria mostrar bruto 116200, IRRF 17400 e líquido 98800 — só um `amount_raw`. E uma nota de
+corretagem sem a quebra de custos não é uma nota de corretagem: R13 ficaria sem conteúdo. Espremer
+os dois campos em 64 bytes exigiria descartar informação que a API pede; a alternativa honesta é
+declarar o tamanho novo, e está declarado.
+
+**`ExceptionRecord` é seção do snapshot de exposição.** A flag `bit0` do cabeçalho vem de lá, e o
+golden 14 exige que "recuperar do snapshot reproduz a fila de exceção idêntica". A seção é escrita
+por `expose/` a partir da seção correspondente da imagem de recuperação; a borda não a expõe na API
+(a flag não muda o corpo das respostas — os números publicados são os do motor), ela alimenta a
+trilha de auditoria e a métrica operacional.
+
+**Páginas pré-montadas só no tamanho default (25).** `BodyListPage` e `BodyMovementsPage` guardam a
+página inteira já concatenada, com o `"data":[…]` fechado, para o page-size default: `GET /investments`
+com paginação default vira **um** lookup e **um** span no `writev`. Page-size não-default cai no
+caminho lento (`BodyItem` + montagem por lista de spans), que existe, é correto e é mais devagar. A
+assimetria é deliberada e está escrita aqui **para o revisor não "consertar"**.
+
+### 3.11 Servidor HTTP e o pipeline FAPI
+
+```cpp
+// src/edge/http_server.hpp
+namespace rv::edge {
+
+inline constexpr uint32_t kMaxRequestBytes = 16u << 10;
+inline constexpr uint16_t kMaxHeaders      = 32;
+inline constexpr uint16_t kMaxUriBytes     = 2048;
+inline constexpr uint32_t kMaxBodyBytes    = 0;   // os SEIS endpoints da API RV são GET
+
+struct ServerOptions {
+  uint16_t port;  uint32_t max_connections;  uint32_t io_depth;
+  uint32_t max_header_bytes;   // limite ANTES de qualquer parse (CODING_RULES §14)
+  uint32_t max_uri_bytes;
+  uint32_t keep_alive_s;       // agressivo: o handshake RSA é o custo, não a requisição
+};
+
+struct TlsPeer {
+  uint8_t          x5t_s256[32];   // thumbprint SHA-256 do cert do cliente (RFC 8705)
+  bool             chain_ok;       // cadeia ICP-Brasil validada
+  bool             resumed;        // POR R6 DEVE SER SEMPRE false; true é violação detectável
+  uint16_t         cipher_id;
+  uint16_t         tls_version;
+  std::string_view subject_dn;     // aponta para o buffer da conexão
+};
+
+// A resposta é uma LISTA de spans, não um span único.
+struct ResponseChunks { std::span<const std::byte> parts[8]; uint8_t count; };
+struct Response {
+  uint16_t       status;
+  char           head[512];        // linha de status + cabeçalhos, em buffer fixo
+  uint16_t       head_len;
+  ResponseChunks body;
+};
+
+// concept, com implementação de loopback em bytes crus: as seis etapas testáveis sem TLS real.
+template <class T> concept HttpTransport = requires(T t) { /* accept/read/write/close */ };
+
+template <HttpTransport T>
+class HttpServer {
+ public:
+  static Result<HttpServer*> create(Arena&, const ServerOptions&, T&) noexcept;
+  [[nodiscard]] Status run_once(uint64_t now_ns) noexcept;   // mesma forma de Partition::poll
+  void request_stop() noexcept;
+};
+}
+```
+
+**`kMaxBodyBytes = 0`** é a redução de superfície mais barata que existe para um processo que recebe
+tráfego externo com parser HTTP próprio (ADR-0019 exige fuzz justamente por isso): qualquer corpo é
+rejeitado antes de ser lido.
+
+**Por que a resposta é uma lista de spans e não um `span` único.** Três coisas exigidas pela API RV
+**não podem** estar pré-serializadas no arquivo: `links` (`self`/`first`/`prev`/`next`/`last`), que
+contêm a query da própria requisição; `meta.requestDateTime`, que é o instante da requisição; e a
+refeitura de `meta.totalPages` para page-size não-default. Com um span único apontando para o mmap,
+`GET /investments?page=2&page-size=50` seria **irrespondível**: nenhum sub-span de um blob
+pré-serializado produz `"links":{"self":".../investments?page=2&page-size=50",…}`. E "recorte
+paginado de corpo já serializado" é impossível como recorte de bytes — paginar um JSON exige recortar
+entre elementos do array e refechar `]}`. Com `ResponseChunks`, o handler monta prólogo, `links` e
+`meta` na arena da requisição e intercala o blob do snapshot, sem cópia e sem alocação.
+
+```cpp
+// src/edge/pipeline.hpp — as seis etapas de docs/arquitetura.md, na ordem de custo de rejeitar.
+namespace rv::edge {
+
+enum class Endpoint : uint8_t {
+  InvestmentsList = 0, InvestmentDetail, Balances, Transactions, TransactionsCurrent, BrokerNote, Count
+};
+inline constexpr uint16_t kMonthlyLimit[static_cast<size_t>(Endpoint::Count)] = {30, 4, 30, 4, 30, 30};
+enum class Stage : uint8_t { Tls = 1, InteractionId, Token, Consent, Quota, Lookup };
+
+struct InteractionId { char v[36]; };
+struct TokenClaims {
+  uint64_t exp_s, iat_s;
+  std::string_view consent_urn;                  // consent:urn:<org>:<id>
+  std::string_view scope, client_id;
+  uint8_t  cnf_x5t_s256[32];
+  bool     has_variable_incomes_read;
+};
+
+// O consentimento carrega o TITULAR. Sem isso, nada liga o consentimento a uma conta.
+struct ConsentRecord {
+  std::string_view consent_urn;
+  DocumentId       subject;                      // CPF/CNPJ do titular
+  uint32_t         permissions;                  // bitmask; bit0 = VARIABLE_INCOMES_READ
+  enum class St : uint8_t { Authorised, Rejected, Expired, Revoked } status;
+  DateYmd          expires_on;
+};
+class ConsentStore {                             // ADR-0009 e ADR-0002: invalidação por push
+ public:
+  [[nodiscard]] Status apply_event(ByteSpan) noexcept;                 // fora do caminho da requisição
+  [[nodiscard]] const ConsentRecord* find(std::string_view urn) const noexcept;
+};
+using ConsentView = ConsentRecord;
+
+struct QuotaDecision { uint32_t used, limit; bool allowed, rate_limited; };
+
+// Parâmetros de consulta: R11 exige filtros de data e paginação, e não havia campo nenhum.
+struct Query { uint32_t page = 1, page_size = kDefaultPageSize; DateYmd from{}, to{}; };
+
+struct RequestContext {
+  // entrada
+  const TlsPeer*      peer;
+  std::string_view    method, target;
+  HeaderView          headers;
+  uint64_t            now_ns;                 // relógio SEMPRE por parâmetro, em qualquer camada
+  DateYmd             request_date;           // derivada UMA vez, em America/Sao_Paulo (edge/timezone.hpp)
+  Arena&              scratch;                // arena da requisição: prólogo, links, meta
+  // preenchido etapa a etapa
+  InteractionId       interaction_id;
+  Endpoint            endpoint;
+  Query               query;
+  std::string_view    resource_id;            // investmentId ou brokerNoteId
+  TokenClaims         claims;
+  ConsentView         consent;
+  QuotaDecision       quota;
+  wal::SnapshotSet::Guard snapshot;           // RAII: o mmap vive até a completion do ENVIO
+  uint32_t            account_slot;           // resolvido de consent.subject na etapa 6
+  // saída
+  Response            response;
+  Stage               stopped_at;
+  Status              error;
+};
+
+using StageFn = Status (*)(RequestContext&) noexcept;
+
+[[nodiscard]] Status check_mtls(RequestContext&) noexcept;             // 1 — R6
+[[nodiscard]] Status check_interaction_id(RequestContext&) noexcept;   // 2 — R1
+[[nodiscard]] Status check_access_token(RequestContext&) noexcept;     // 3 — R2, R3, R7
+[[nodiscard]] Status check_consent(RequestContext&) noexcept;          // 4 — R4, R5
+[[nodiscard]] Status check_quota(RequestContext&) noexcept;            // 5 — R16
+[[nodiscard]] Status serve_from_snapshot(RequestContext&) noexcept;    // 6 — R8..R15
+
+inline constexpr StageFn kPipeline[] = {
+  check_mtls, check_interaction_id, check_access_token, check_consent, check_quota, serve_from_snapshot
+};
+inline constexpr size_t kStageCount = std::size(kPipeline);
+
+[[nodiscard]] Status handle(RequestContext& rc) noexcept;   // roda kPipeline; para na primeira falha
+}
+```
+
+**Por que um array de ponteiros de função.** O pipeline do documento de arquitetura tem seis itens
+numerados; o código tem seis entradas numeradas, na mesma ordem, no mesmo arquivo. Sem virtual, sem
+registro dinâmico, sem "middleware". Ler `kPipeline` é ler a especificação, e
+`tests/edge/test_pipeline_order.cpp` afirma a ordem, porque a ordem **é** requisito (rejeitar antes
+de gastar).
+
+**O consentimento carrega o titular — sem isso há um vazamento de dados, não um campo faltando.**
+Nenhuma das seis etapas produzia um `DocumentId`, e a única porta por recurso era
+`find_position(InvestmentId)`, que não recebia conta nenhuma e portanto não conferia titularidade.
+Duas quebras: `GET /investments` era irrespondível (a etapa 6 não tinha chave para
+`find_account`); e `GET /investments/{investmentId}/balances` devolveria a posição de quem quer que
+fosse dono daquele `investmentId`. Agrava porque `InvestmentId` é UUID v5 sobre (documento, símbolo)
+— algoritmo público, sem segredo: quem tem um consentimento válido do próprio CPF calcularia o UUID
+de (CPF alheio, PETR4) e leria a posição do vizinho, com 200 tickers de dicionário. Nenhum teste de
+R4 ou R15 pegaria, porque todos testam **status** de consentimento, não **titularidade do recurso**.
+
+As duas correções são estruturais, não de disciplina: `ConsentRecord` tem `subject`, e
+`find_position` **exige** `account_slot` na assinatura — não existe lookup por `investmentId` sem a
+conta. Divergência é **404**, nunca 200, e `tests/edge/test_r15_cross_account_denied.cpp` entra na
+tabela de §6.2.
+
+**R14 é metade estrutural e metade disciplina; a metade que faltava era a que importa.** Estrutural:
+`rs` não linka `rv_core` e a borda só enxerga `snapshot_format.hpp` — não existe caminho de código
+para o estado vivo, e isso é garantido pelo link. Disciplina: nada impedia publicar um snapshot
+cujo `base_date` fosse o dia corrente; um unit de systemd publicando logo após o stall do EOD, às
+18h40 do próprio dia D, exporia posições intradiárias de D durante D — violação regulatória que
+`test_r14_d1_only` não pegaria, porque ele só comparava dois campos do cabeçalho. E a borda não
+tinha como olhar: `now_ns` é nanossegundos desde a época, `DateYmd` é "sem fuso" por definição, e
+não havia função `now_ns → data em São Paulo`. As três correções:
+
+1. `SnapshotSet::publish` **recusa** arquivo com `base_date >= request_date` e devolve erro.
+2. `RequestContext::request_date` é derivada **uma vez por requisição** por `edge/timezone.hpp` —
+   tabela de offsets de America/Sao_Paulo, sem `std::chrono` no caminho quente (o Brasil não tem
+   mais horário de verão, o que torna a tabela trivial e estável).
+3. `current_window_from`/`current_window_to` no cabeçalho tornam a janela D-6..D de R12 um **fato do
+   arquivo**, verificável, e não uma conta refeita na borda: sem âncora, uma requisição às 02:00Z
+   (23:00 do dia anterior em Brasília) pegaria um dia a mais ou a menos, e ninguém saberia se são
+   sete dias corridos ou sete pregões.
+
+```cpp
+// src/edge/snapshot_set.hpp — o motor escreve N arquivos; a borda precisa ver os N.
+namespace rv::edge {
+class SnapshotSet {
+ public:
+  class Guard {                       // RAII; o munmap só acontece quando o último Guard morre
+   public:
+    [[nodiscard]] const wal::SnapshotView* view() const noexcept;
+    ~Guard() noexcept;                // liberado na COMPLETION DO ENVIO, não no retorno do handler
+  };
+  [[nodiscard]] Guard acquire(PartitionId) noexcept;
+  [[nodiscard]] Guard acquire_for(DocumentId) noexcept;   // roteia por mix64 e partition_count
+  // Troca ATÔMICA do conjunto inteiro, a partir do manifesto: ou o dia todo está publicado,
+  // ou nenhuma partição está.
+  [[nodiscard]] Status publish(const char* manifest_path, DateYmd request_date) noexcept;
+};
+}
+```
+
+**Por que um conjunto, e por que a troca é do conjunto inteiro.** O motor escreve um snapshot por
+partição (`partition_id` no cabeçalho, manifesto partição→arquivo→LSN), e a borda enxergava
+exatamente **um** `SnapshotView`: com as 4 partições da máquina de referência, o RS que mapeou o
+arquivo da partição 0 devolveria 404 para ~75 % dos consentimentos. Replicar a constante `n` na
+borda para contornar seria pior: um rebalanceamento para 8 partições passaria a apontar
+consistentemente para o arquivo errado, e como `find_account` usa o documento como chave exata o
+sintoma voltaria a ser 404 silencioso. Por isso `partition_count` é campo do cabeçalho e do
+manifesto, `rs_main` o confere contra a sua configuração na partida, e a regra
+`partition = mix64(documento) & (n−1)` mora em `base/hash.hpp` — a mesma definição que o ingress
+usa. A troca do conjunto inteiro casa com a regra do manifesto ("o conjunto de D só vale com
+`EodMark` em todas"): evita servir metade das contas em D-1 e metade em D-2.
+
+**O `Guard` é RAII e vive até a completion do envio.** O corpo aponta para dentro do mmap e o
+servidor é assíncrono. Se o `release` acontecesse no fim do handler, uma publicação às 19h enquanto
+uma receptora lenta ainda drena 1 MB faria o `munmap` do arquivo antigo acontecer com um
+`IORING_OP_SEND` em voo sobre aquelas páginas — SIGSEGV no processo que recebe tráfego externo,
+exatamente uma vez por dia, no EOD. O `Guard` mora em `RequestContext` e é destruído na completion.
+
+**Erro, auditoria e métrica.**
+
+```cpp
+// src/edge/problem.hpp e audit.hpp
+namespace rv::edge {
+struct FapiOutcome { uint16_t http_status; Stage stage; uint8_t _pad; Err code; };
+[[nodiscard]] uint16_t http_status_of(Err) noexcept;   // ... UnprocessableRange → 422
+
+struct AuditRecord {                 // R19: o que foi mostrado, não só que houve acesso
+  InteractionId interaction_id;  std::string_view consent_urn, client_id;
+  Endpoint endpoint;  Stage stage;  uint16_t http_status;
+  uint64_t snapshot_lsn;  uint32_t base_date;  uint16_t revision;  uint64_t now_s;
+};
+}
+```
+
+`snapshot_lsn` + `base_date` + `revision` na trilha são o que ligam uma resposta contestada a uma
+versão específica do arquivo — sem eles, R19 registra que houve acesso mas não o que foi mostrado. A
+`stage` dá a R18 uma classificação **com causa** (rejeitado no token vs. no consentimento vs. no
+limite), que é o que a apuração de disponibilidade precisa para não contar rejeição legítima como
+indisponibilidade. E a métrica de R17 separa **tempo de handshake** de **tempo de requisição**: sem
+resumption (R6), cada conexão paga assinatura RSA completa, e um P95 por endpoint que incluísse o
+handshake mediria a coisa errada exatamente no requisito que o regulador monitora. `TlsPeer::resumed`
+é a verificação em tempo de execução do que `test_r6_tls_profile` audita no `SSL_CTX`: é a que pega
+uma mudança de configuração em produção.
+
+**Quota (R16).** `edge/quota.cpp` mantém os contadores em **arquivo mapeado** com `msync` periódico
+e no rollover, chaveados por `(consent_urn, endpoint, yyyymm)` com o mês em horário de Brasília.
+Contadores só em memória do processo devolveriam as 4 chamadas de `/transactions` a um consentimento
+esgotado no primeiro deploy do RS: `test_r16_monthly_limits` passaria (é in-process) e a suíte de
+conformidade funcional do OFB não. Os códigos 423 (limite operacional) e 429 (rate limit) estão
+marcados como "a confirmar no manual vigente" em `docs/open-finance.md` — pendência §8.
+
+---
+
+## 4. Convenções
+
+**Namespaces.** `rv` guarda o vocabulário (`rv::Money`, `rv::Status`, `rv::Lsn`) — sem prefixo
+extra, porque aparece em toda linha. As camadas ganham `rv::core`, `rv::wal`, `rv::edge`,
+`rv::codec`, `rv::json`, `rv::expose`, `rv::ingress`. Declaração aninhada (`namespace rv::core {…}`).
+Nunca `using namespace` em header; nunca namespace anônimo em header. Símbolo local de TU vai em
+namespace anônimo no `.cpp`.
+
+**Nomes.**
+
+| Coisa | Forma | Exemplo |
+|---|---|---|
+| Arquivo | `snake_case`, nomeado pelo tipo principal | `group_commit.hpp` |
+| Tipo, concept | `PascalCase` | `SnapshotView`, `Journal`, `IoBackend` |
+| Função, variável, membro público | `snake_case` | `durable_lsn()` |
+| Membro privado | `snake_case_` | `cur_`, `seg_off_` |
+| Constante de compilação | `kPascalCase` | `kMaxGroup`, `kSettleSlots` |
+| Enumerador (`enum class`) | `PascalCase` | `Side::Buy` |
+| Macro | `RV_` | `RV_INVARIANT` |
+
+Nome que precisa de comentário está errado: prefira `notional_half_even` a `calc(…) // half-even`.
+**A política de arredondamento faz parte do nome da função**, e é por isso que `position_cost_half_even`
+existe em vez de morar escondida dentro de `average_price_half_even` (§3.2).
+
+**Erros.** `Status`/`Result<T>` em toda a `src/`, com `[[nodiscard]]`. `-fno-exceptions` em
+`rv_base`, `rv_codec`, `rv_core`, `rv_wal`, `rv_format`, `rv_json`, `rv_expose`; `rv_edge` e
+`rv_http` compilam com a mesma flag — nada no caminho da requisição lança, e OpenSSL retorna código.
+Os binários de teste compilam **com** exceções e linkam bibliotecas sem elas: é seguro porque
+nenhuma delas lança (`CODING_RULES §4`), e permite `EXPECT_DEATH`/`EXPECT_THROW` nos testes de
+pré-condição. `std::optional` é permitido (não lança); `std::expected` não é usado — `Result<T>` é o
+mesmo conceito com garantia de POD e tamanho conhecido.
+
+**Asserts.** `RV_ASSERT` para pré-condição de programador. `RV_INVARIANT(Ix, …)` para as **treze**
+invariantes numeradas, e só para elas; a severidade em release vem do registro
+(`base/invariant_registry.hpp`), não de uma frase. `RV_CHECK` é sempre ativo e O(1) — é o que
+guarda o portão do outbox em release. `RV_FAIL_STOP` para violação de durabilidade ou de ledger.
+Nenhum deles pode ter efeito colateral, e há um teste que prova isso (§3.1).
+
+**Verificação de invariante O(n) não vai dentro de `apply`.** `verify_i1`, `verify_i2`, `verify_i3`
+e `verify_i13` são varreduras da partição inteira e vivem em `core/verify.hpp`, chamadas **ao fim de
+cada teste**, não a cada evento. O motivo é aritmético: I1 e I13 percorrem buckets diferentes, então
+seriam duas varreduras por posição por `apply` em debug, mais a de I2; e o teste de I11 ("para todo
+k: snapshot em k + replay k+1..N") já é O(N²) applies — com três varreduras O(posições) por apply,
+viraria O(N³) e não caberia na CI, e alguém desligaria os asserts justamente no build em que I11 é
+verificada. `debug_check_position()` faz a versão O(1) por linha tocada; `verify_*` faz a total.
+
+**Header-only vs `.cpp`.** Fica no header o que é: (a) template, (b) `constexpr`, (c) acessor de até
+três linhas, (d) definição de formato (`struct` POD + `static_assert`). Todo o resto vai para `.cpp`
+— por tempo de compilação e por um lugar único para pôr breakpoint. `src/base` e as três folhas de
+formato são quase inteiramente header; `src/core/apply.cpp` e `src/wal/group_commit.cpp` são
+deliberadamente `.cpp`.
+
+**Formato persistente.** Todo `struct` que toca disco tem `static_assert` de `sizeof`, `alignof` e
+`has_unique_object_representations_v`, campo `_pad` explícito e zerado no encode, e uma constante de
+versão no cabeçalho. Mudança de layout = bump + teste de leitura da versão anterior
+(`CODING_RULES §11`) + veto cruzado de `persistencia` e `verificador` com suíte de crash verde
+(CLAUDE.md). São **três** formatos independentes, com versões independentes: `wal_format`
+(registro e segmento), `state_format` (imagem de recuperação) e `snapshot_format` (exposição).
+
+**Include.** `#pragma once`. Ordem: o próprio header, `<...>` do C++, `<...>` do sistema,
+`"rv/..."`. Caminhos a partir de `src/` (`#include "wal/snapshot_format.hpp"`).
+
+**`TODO`.** Só com `ADR-NNNN` ou número de issue no mesmo comentário. `scripts/check_rules.py` falha
+o build sem isso.
+
+**Determinismo em teste.** Toda semente de PRNG é explícita e entra no artefato:
+`base/xorshift.hpp` exige semente no construtor, `tools/fixturegen` a recebe na linha de comando, e
+a semente do simulador de carga viaja no próprio log, em `DayOpened.sim_seed`. Uma falha de caos
+que não se reproduz não é um teste, é uma anedota — e num projeto cuja tese é "o estado é função
+pura do prefixo do log", a semente que gerou o prefixo pertence ao prefixo.
+
+---
+
+## 5. Alvos de build
+
+```
+rv_base      STATIC   base/                          -fno-exceptions -fno-rtti
+rv_codec     STATIC   codec/ + gerados               → rv_base
+rv_format    INTERFACE wal/*_format.hpp              → rv_base           (só cabeçalhos de dados)
+rv_json      STATIC   json/                          → rv_base
+rv_core      STATIC   core/                          → rv_base rv_codec rv_format
+rv_wal       STATIC   wal/ (menos os formatos)       → rv_base rv_codec rv_format rv_core liburing
+rv_wal_testing INTERFACE wal/testing/ + mem/fault    → rv_base rv_format
+rv_ingress   STATIC   ingress/                       → rv_base rv_codec
+rv_expose    STATIC   expose/                        → rv_base rv_format rv_json OpenSSL(sha)
+rv_jose      STATIC   edge/jose*, jwks*, token*      → rv_base rv_json OpenSSL
+rv_http      STATIC   edge/http*, tls_server         → rv_base liburing OpenSSL
+rv_edge      STATIC   edge/ (resto)                  → rv_base rv_format rv_json rv_jose rv_http
+
+motor        EXE  app/motor_main.cpp      → rv_core rv_wal rv_ingress rv_expose
+rs           EXE  app/rs_main.cpp         → rv_edge                       (NÃO linka rv_core)
+replay       EXE  app/replay_main.cpp     → rv_core rv_wal   -Wl,--wrap=clock_gettime,--wrap=getrandom,--wrap=time
+snapdump     EXE  tools/snapcat.cpp       → rv_format rv_json
+walcat       EXE  tools/walcat.cpp        → rv_format rv_codec
+replay_check EXE  tools/replay_check.cpp  → rv_core rv_wal
+fixturegen   EXE  tools/fixturegen.cpp    → rv_core rv_wal rv_ingress
+simulador    EXE  app/simulador_main.cpp  → rv_ingress rv_codec
+bench        EXE  app/bench_main.cpp      → rv_core rv_wal rv_edge        (ADR-0021)
+
+test_domain   EXE tests/domain/  → rv_core GTest
+test_core     EXE tests/core/    → rv_core GTest            (usa core::testing::MemoryJournal)
+test_wal      EXE tests/wal/     → rv_wal rv_wal_testing GTest   (NÃO linka rv_core: usa FakeApplier)
+test_edge     EXE tests/edge/    → rv_edge GTest
+test_contract EXE tests/edge/contract/ → rv_edge GTest      (gerado do OpenAPI da API RV)
+test_chaos    EXE tests/chaos/   → rv_core rv_wal GTest
+fuzz_jws      EXE tests/edge/fuzz_jws.cpp     → rv_jose  libFuzzer
+fuzz_json     EXE tests/edge/fuzz_json.cpp    → rv_json  libFuzzer
+fuzz_http     EXE tests/edge/fuzz_http.cpp    → rv_http  libFuzzer
+fuzz_record   EXE tests/wal/fuzz_record.cpp   → rv_wal   libFuzzer
+```
+
+**`rs` não linka `rv_core`.** É a forma executável de `CODING_RULES §10`: se alguém incluir um
+header de núcleo na borda, o link quebra antes de qualquer revisão humana.
+
+**`test_wal` não linka `rv_core`.** É o que o `ApplierPort` de `wal/replay.hpp` compra: com
+`wal::testing::FakeApplier` — que só registra `(lsn, tmpl, crc(payload))` — a suíte inteira de WAL
+roda sem domínio nenhum. Toda falha de ordenação FIFO ou de travessia de padding chega **isolada**,
+em vez de misturada com falhas de domínio, e o teste de I9 deixa de depender de as dez funções
+`apply_*` já existirem — o que desacopla a frente de `persistencia` da frente de `domínio` na Onda 2.
+
+**`replay` é executável dedicado, sem GoogleTest.** O envenenamento de símbolo de I12 é global no
+binário: um `clock_gettime` local que aborta seria chamado pelo próprio GTest
+(`testing::internal::GetTimeInMillis`) antes de qualquer caso do usuário, e o binário morreria no
+primeiro teste. Com `--wrap` no link de um executável sem GTest, a verificação roda de verdade.
+
+**Flags** (de `docs/ambiente.md`, não de `docs/arquitetura.md` — ver §8):
+`-std=c++23 -Wall -Wextra -Wpedantic -Werror -march=x86-64-v2 -mtune=native` (ADR-0022; `x86-64-v3`
+gera SIGILL na máquina de referência). Release: `-O3 -flto=auto`. Presets: `debug-gcc`,
+`debug-clang`, `asan`, `ubsan`, `tsan`, `release`, `release-lto`, `native` (opcional, **nunca**
+usado para baseline).
+
+**CRC32C é escolhido em COMPILAÇÃO.** `#if defined(__SSE4_2__)` usa `_mm_crc32_u64`; a tabela
+continua existindo como implementação de alvo não-v2, mas deixa de ser um ponteiro de função. O
+despacho em runtime custava uma chamada indireta **por registro de WAL** — isto é, por evento, na
+função mais quente do caminho de durabilidade — para um ramo que nunca é tomado, já que
+`x86-64-v2` já inclui SSE4.2 e a máquina de referência o tem. Pior, a indireção impedia o inlining
+do CRC dentro do `commit`, que era justamente o ponto de calcular sobre o buffer que acabou de ser
+escrito e está em L1.
+
+**Cada diretório tem seu próprio `CMakeLists.txt`;** a raiz só faz `add_subdirectory`. É a regra que
+impede dois agentes de conflitarem no mesmo arquivo de build.
+
+**Geração de codecs:** `scripts/sbe_gen.py schema/events.xml -o ${CMAKE_BINARY_DIR}/generated/rv/codec/`
+via `add_custom_command`, com `DEPENDS` no XML e no gerador. Saída nunca é versionada (ADR-0006 +
+ADR-0017). O gerador também emite `schema_digest.hpp`, que o `segment_manager` usa para decidir
+rotação de segmento.
+
+---
+
+## 6. Invariantes e requisitos: onde é verificado, qual teste cobre
+
+### 6.1 I1..I13
+
+| Id | Classe | Verificado em | Teste | Rótulo `ctest` |
+|---|---|---|---|---|
+| I1 | ledger | `custody_ledger.hpp::custody_today()`, chamada por `debug_check_position()` ao fim de cada `apply` em debug e por `verify_i1()` ao fim de cada teste; em produção, `apply.cpp::apply_custody_reconciled` a compara com `custodian_qty` | `tests/domain/test_i1_custody_sum.cpp` (propriedade) + `tests/domain/test_g14_reconciliation.cpp` | `I1` |
+| I2 | ledger | `cash_ledger.hpp::pending_of(account, slot)` e `apply.cpp::apply_batch_netted` (net acumulado × `BatchNetted.net_amount` → `Err::NettingMismatch`, **rejeição em produção**); `RV_INVARIANT(I2,…)` antes de reciclar slot do anel | `tests/domain/test_i2_cash_by_date.cpp` + `test_g05_day_trade_netting.cpp` | `I2` |
+| I3 | ledger | `custody_ledger.hpp::add_qty()` / `add_pending()` — os únicos mutadores de quantidade; a flag de descoberto é lida da **linha** (`custody.flags & kShortAllowed`), não do evento | `tests/domain/test_i3_non_negative_buckets.cpp` (propriedade) + `test_g04_short_sell.cpp` | `I3` |
+| I4 | ledger | `core/average_price.hpp::set_avg_price(..., AvgPriceAuthority)` — o tipo-tag só é construível por `settlement.cpp::settle_buy` e por `corporate_action.cpp`: uma terceira função **não compila** | `tests/domain/test_i4_average_price.cpp` + `tests/core/test_i4_static_authority.cpp` (compilação negativa) | `I4` |
+| I5 | domínio | `trade_state.hpp::next_state()` (tabela `constexpr` única) sobre o `TradeState` guardado em `core/trade_book.hpp`; fora do grafo ⇒ `Err::InvalidTransition` e **estado byte a byte idêntico** (D8) | `tests/domain/test_i5_trade_state_machine.cpp` (60 combinações; 7 no grafo, 53 rejeitadas com digest inalterado) | `I5` |
+| I6 | domínio | `core/corporate_action_log.hpp` — chave **`(action_id, account, stage)`** com a chave inteira guardada e comparada; valor `{ex_date, outcome}`; poda por `DayOpened` (D − `prune_days`) | `tests/domain/test_i6_corporate_action_idempotent.cpp` (inclui os cinco casos do golden 13, com `AberturaDia` avançando 61 dias) | `I6` |
+| I7 | domínio | `expose/gross_amount.hpp` → `notional_half_even`, sobre a quantidade **I1**; gravado em `Section::PositionGrossAmount` | `tests/domain/test_i7_gross_amount_golden.cpp` + `tests/edge/contract/test_r10_balances.cpp` | `I7` |
+| I8 | durabilidade | `wal/wal.cpp` (`last_lsn_ + 1`), `wal/segment_reader.cpp` (`lsn == esperado`) e `SegmentHeader::prev_segment_last_lsn` na fronteira entre segmentos | `tests/wal/test_i8_lsn_monotonic.cpp` + `tests/wal/test_padding_traversal.cpp` | `I8` |
+| I9 | durabilidade | `wal/group_commit.cpp` — FIFO `inflight_`; `durable_lsn` só avança pela cabeça | `tests/wal/test_i9_durable_fifo.cpp` (permutação explícita de completions via `FaultBackend`) | `I9` |
+| I10 | durabilidade | `core/outbox.hpp::release_upto()` — portão único, com `RV_CHECK` **em release** | `tests/chaos/test_i10_outbox_gate.cpp` (`kill -9`) + `tests/chaos/test_i10_restart_no_replay_output.cpp` (nada com `lsn <= durable_pré-queda` sai depois de recuperar) | `I10` |
+| I11 | durabilidade | `core/fingerprint.hpp::state_digest()`, gravado em `EodMarked.state_digest` e em `StateHeader.state_digest`; o replay recomputa **antes** de aplicar e compara (`Err::StateDigestMismatch`) | `tests/core/test_i11_replay_equivalence.cpp` (para todo *k* do roteiro) + `tools/replay_check` no CI | `I11` |
+| I12 | determinismo | `scripts/check_determinism.py` (lista **branca** de `nm -u` sobre `rv_core.a` + varredura de opcode por `rdtsc`/`rdtscp`/`rdrand`/`rdseed`); clang-tidy `rv-ts-no-compare`; `app/replay_main.cpp` linkado com `--wrap=clock_gettime,--wrap=getrandom,--wrap=time` | `tests/core/test_i12_no_clock_no_rng.cpp` (roda **no** binário `replay`, sem GTest) | `I12` |
+| I13 | ledger | `custody_ledger.hpp::custody_projected()`, chamada por `debug_check_position()` e por `verify_i13()` | `tests/domain/test_i13_projected_position.cpp` (o golden 03 percorre os cinco estados afirmando I1 e I13 em cada um) | `I13` |
+
+O `CMakeLists.txt` de cada suíte registra o rótulo
+(`set_tests_properties(... PROPERTIES LABELS "I3")`), então `ctest -L I3` responde "qual teste cobre
+I3" sem consultar documento. `scripts/check_invariants.py` cruza os rótulos com
+`docs/invariantes.md` **e** com `base/invariant_registry.hpp`, e falha se alguma das três listas
+divergir — é a mecanização de "invariante sem teste não existe".
+
+**A coluna "Classe" não é decorativa:** ela é o dado que `RV_INVARIANT` consulta em release.
+`kLedger` e `kDurability` fazem fail-stop; `kDomain` rejeita o evento e segue; `kDeterminism` não
+tem checagem de runtime, é verificado no build. Sem essa tabela, "fail-stop quando a classe for
+durabilidade ou ledger" era uma regra sem definição — e para I9 a resposta importa muito: uma
+violação de ordem FIFO detectada em produção tem de **parar** a partição, não incrementar um
+contador.
+
+### 6.2 R1..R19
+
+| Id | Camada | Onde vive | Teste |
+|---|---|---|---|
+| R1 | RS | `edge/pipeline.cpp::check_interaction_id` (etapa 2) | `tests/edge/test_r1_interaction_id.cpp` |
+| R2 | RS | `edge/jose.cpp::verify_access_token` + `jwks_cache` | `tests/edge/test_r2_token_ps256.cpp` |
+| R3 | RS | `verify_access_token` compara `cnf.x5t#S256` com `TlsPeer::x5t_s256` | `tests/edge/test_r3_cert_binding.cpp` |
+| R4 | RS | `edge/consent.cpp` + `ConsentStore::apply_event` (invalidação push) — etapa 4 | `tests/edge/test_r4_consent_authorised.cpp` |
+| R5 | RS | `edge/consent.cpp::check_scope` (`consent:urn:…`, bit `VARIABLE_INCOMES_READ`) | `tests/edge/test_r5_scope_permission.cpp` |
+| R6 | RS/TLS | `edge/tls_server.cpp` (cipher suites, resumption e renegotiation off) **e** `TlsPeer::resumed == false` em runtime | `tests/edge/test_r6_tls_profile.cpp` (auditoria do `SSL_CTX` + handshake real) |
+| R7 | RS | `edge/jose.cpp` (`alg ≠ PS256`, `kid` desconhecido → `BadSignature` → 400) | `tests/edge/test_r7_bad_signature.cpp` + `fuzz_jws` |
+| R8 | RS | `edge/handlers.cpp::investments_list` + `Section::BodyListPage` (default 25) e caminho lento por `BodyItem` | `tests/edge/contract/test_r8_list.cpp` |
+| R9 | RS | `handlers.cpp::investment_detail` + `Section::BodyInvestmentRef` | `tests/edge/contract/test_r9_detail.cpp` |
+| R10 | RS/snapshot | `handlers.cpp::balances` + `Section::PositionGrossAmount` (I7, sobre a quantidade I1) | `tests/edge/contract/test_r10_balances.cpp` |
+| R11 | RS/histórico | `handlers.cpp::transactions` sobre `Section::MonthlySegment` + `RequestContext::Query{from,to,page}` | `tests/edge/contract/test_r11_transactions.cpp` |
+| R12 | RS/snapshot | `handlers.cpp::transactions_current` sobre `Section::MovementRecord` em CSR por linha de posição; janela lida de `current_window_from/to` | `tests/edge/contract/test_r12_current.cpp` |
+| R13 | RS/snapshot | `handlers.cpp::broker_note` + `SnapshotView::find_broker_note` + `Section::BrokerNoteBlob` | `tests/edge/contract/test_r13_broker_note.cpp` |
+| R14 | snapshot | `ExposureHeader::base_date` = **`EodMarked.date`**; `SnapshotSet::publish` recusa `base_date >= request_date`; `rs` não linka `rv_core` | `tests/edge/contract/test_r14_d1_only.cpp` (afirma `base_date == EodMarked{D}.date`, `custody_checksum` igual, e `base_date <` hoje em São Paulo) |
+| R15 | RS | `expose/investment_id.cpp` + `SnapshotView::find_position(account_slot, id)` | `tests/edge/contract/test_r15_resource_id.cpp` + **`tests/edge/test_r15_cross_account_denied.cpp`** |
+| R16 | RS | `edge/quota.cpp` com `kMonthlyLimit` (etapa 5) e `limits_store` em arquivo mapeado; 423 e 429 em `problem.cpp` | `tests/edge/test_r16_monthly_limits.cpp` (inclui restart e rollover de mês com `frozen_clock`) |
+| R17 | RS/observabilidade | `edge/audit.cpp` — histograma por `Endpoint`, **handshake separado da requisição**; harness em `app/bench_main.cpp` | `tests/edge/test_r17_latency_slo.cpp` |
+| R18 | RS/observabilidade | `edge/audit.cpp` — 2XX/422 sucesso, 5XX/408 erro, classificados por `FapiOutcome::stage` | `tests/edge/test_r18_availability_classes.cpp` |
+| R19 | RS/log | `edge/audit.cpp` com `snapshot_lsn`, `base_date` e `revision` servidos | `tests/edge/test_r19_audit_trail.cpp` |
+
+Mesmo mecanismo de rótulo: `ctest -L R10`. `scripts/check_traceability.py` cruza com
+`docs/rastreabilidade.md`.
+
+**Duas lacunas que este contrato NÃO fecha, nomeadas de propósito** (para `regulatorio-open-finance`
+fechar antes da fase 4, e não para o implementador inventar na semana da certificação):
+
+- **R16 — os códigos 423 e 429.** `docs/open-finance.md` já os marca como "a confirmar no manual
+  vigente". A estrutura (arquivo mapeado, chave `(consent_urn, endpoint, yyyymm)`, mês em Brasília)
+  está fixada aqui; o código HTTP de cada caso, não.
+- **R13 — o caminho exato de `/broker-notes/{id}` na 1.3.0.** Versões antigas o aninhavam sob
+  `/investments/{investmentId}`. `BrokerNoteBlob` funciona para qualquer um dos dois; só a tabela de
+  rotas muda.
+
+---
+
+## 7. Ordem de construção
+
+**Regra de conflito zero:** cada arquivo tem exatamente um agente dono; cada diretório tem seu
+`CMakeLists.txt`. Dois agentes nunca abrem o mesmo arquivo.
+
+### Onda 0 — as barreiras (sequencial, bloqueia todo mundo)
+
+Barreira = arquivo cujo conteúdo vários agentes precisam para compilar. Cada uma é escrita **como
+header com assinaturas, `static_assert` e comentário normativo, sem implementação**, revisada pelo
+`verificador` e merged **antes** de qualquer trabalho paralelo depender dela.
+
+| # | Barreira | Conteúdo | Dono | Destrava |
+|---|---|---|---|---|
+| B1 | `base/status.hpp`, `assert.hpp`, `invariant_registry.hpp`, `fixed.hpp`, `rounding.hpp`, `ids.hpp`, `hash.hpp` | §3.1, §3.2, §3.3 | núcleo, com a semântica de arredondamento revisada por `dominio-pos-negociacao` | **todos** |
+| B2 | `base/spsc_ring.hpp` | §3.9 — `try_claim/publish`, `begin_drain/end_drain`, `alignas(64)` em cada cursor | núcleo + desempenho | núcleo, ingress |
+| B3 | `schema/events.xml` | os dez templates de §3.4, campo a campo, com os `kBlockLength` da tabela | `dominio-pos-negociacao` (campos) + núcleo (layout) | gerador, núcleo, WAL, ingress |
+| B4 | `core/state.hpp` + `core/state_layout.hpp` | §3.5 inteiro | núcleo | domínio, `wal/state_image`, `wal/snapshot_writer`, `expose` |
+| B5 | `core/apply.hpp` + `core/journal.hpp` + `core/outbox.hpp` + `wal/io_backend.hpp` | §3.6, §3.7, §3.8 — só declarações e os dois `concept` | núcleo (três primeiros) + persistência (backend) | `core` e `wal` em paralelo |
+| B6 | `wal/wal_format.hpp` + `wal/state_format.hpp` + `wal/snapshot_format.hpp` | §3.7 e §3.10, só `struct` e `static_assert` | persistência, **co-assinado por `borda-fapi`** no `snapshot_format` | WAL, expose, borda |
+
+**São seis, não quatro.** As duas novas — B2 e B4 — são exatamente os buracos que o desenho anterior
+deixava: `PartitionState` era um nome sem conteúdo (nenhum layout SoA, nenhum endereçamento de
+bucket por data, nenhuma tabela de idempotência, nenhuma fila de exceção) e `SpscRing` era a única
+estrutura do hot path sem contrato, apesar de ser a única com atomics do projeto. Sem B4, três
+frentes ficam bloqueadas no dia 1 num arquivo que ninguém foi encarregado de desenhar; sem B2, a
+"drenagem em lote" de ADR-0016 vira um comentário que o código não cumpre, e o custo só aparece no
+bench, depois de dois agentes terem escrito os dois lados.
+
+**C3 é absorvida na Onda 0, não depois.** O anel de datas de §3.5 muda `state_format` e
+`snapshot_format`, que são B6. Aplicar a correção depois seria mudança de formato persistente com
+todos os custos que `CODING_RULES §11` e CLAUDE.md impõem — bump de `kExposureVersion`, `elem_size`
+de duas seções, veto duplo de `persistencia` e `verificador` com suíte de crash verde, e três
+frentes reabertas se cair depois que `expose/` e `edge/handlers` estiverem escritos.
+
+### Ondas paralelas
+
+| Onda | Frentes simultâneas | Dono |
+|---|---|---|
+| 1 | `base/` (corpo) · gerador `scripts/sbe_gen.py` + `codec/sbe_runtime.hpp` · `json/` · presets CMake, sanitizers e os quatro scripts de verificação de §2 | núcleo · núcleo · borda · toolchain |
+| 2 | `core/` (ledgers, máquina de estados, `apply`) · `wal/` runtime (segment, group_commit, backends, `segment_reader`) · `edge/` (http_parse, tls, jose) · `ingress/` (reference_data, calendar, partitioner) | domínio+núcleo · persistência · borda-fapi · núcleo |
+| 3 | `core/state_image` + `wal/snapshot_writer` + `wal/manifest` + `wal/recovery` · `expose/` + `monthly_segments` · `edge/handlers` + `quota` + `snapshot_set` | persistência · persistência+borda · borda-fapi |
+| 4 | `tests/chaos` · `tests/edge/contract` · `bench_main` e baseline · fuzzers | persistência+verificador · regulatório · desempenho · borda-fapi |
+
+Sequência das fases de `docs/plano-fases.md`: Onda 0 + 1 = fase 1; Onda 2 = fase 2; Onda 2–3
+(domínio) = fase 3; Onda 3–4 = fase 4; conformance = fase 5.
+
+### As barreiras reais que sobram, e as anti-barreiras
+
+1. **`schema/events.xml` → gerador → `core/apply.cpp`.** Truque para não esperar: como §3.4 fixa
+   nomes, ordem e tamanho de campo, o gerador e o `apply` podem ser escritos ao mesmo tempo; o
+   encontro é o `static_assert` de `kBlockLength`. Se bater, ninguém esperou.
+2. **`core/state.hpp` → `wal/state_format.hpp`.** É derivação, não negociação: cada estrutura de
+   `PartitionState` vira uma `StateSection`. O mesmo agente escreve as duas na Onda 0.
+3. **`wal/snapshot_format.hpp` → `expose/` e `edge/handlers`.** Duas frentes travadas por um header
+   de dados, com **dois donos** (`persistencia` escreve, `borda-fapi` co-assina). É a barreira mais
+   cara do projeto, e é por isso que ela é da Onda 0 e é `INTERFACE`.
+4. **`expose/exposure_builder.cpp` e `edge/handlers.cpp` são um par acoplado.** Quem gera o blob e
+   quem o serve precisam concordar no byte. Ou é o mesmo agente em sequência, ou o golden é a
+   barreira: `tests/edge/contract/` guarda o blob esperado, o construtor produz e o handler consome.
+5. **`bench/baseline.json` → qualquer PR de otimização.** Barreira de processo, não de código
+   (ADR-0016): antes da fase 2 não existe número, logo não existe otimização aprovável.
+6. **As anti-barreiras.** `core::testing::MemoryJournal`, `wal::testing::FakeApplier`,
+   `wal/mem_backend.hpp`, `wal/fault_backend.hpp`, `edge/transport.hpp::LoopbackTransport`,
+   `edge/testing/fake_peer.hpp` e `edge/testing/frozen_clock.hpp` **não** são barreiras: escritos na
+   Onda 1, permitem que `tests/core` rode sem WAL, `tests/wal` rode sem io_uring **e sem `rv_core`**,
+   e `tests/edge` rode sem TLS real, desde o primeiro dia. A borda tinha 19 requisitos rastreados e
+   nenhuma costura de teste; agora tem as mesmas três que o núcleo.
+
+### O que NÃO pode ser paralelizado
+
+- **B1 antes de tudo.** Dois agentes escrevendo `Fixed` em paralelo produzem duas políticas de
+  arredondamento, e I4 e I7 morrem juntos.
+- **B3 e B4 antes de `core`, `ingress` e `wal`.** Os três dependem dos tamanhos exatos.
+- **Nada mede antes do baseline.** ADR-0016: `desempenho` fixa `bench/baseline.json` na fase 2, e só
+  ele escreve nele.

@@ -29,6 +29,14 @@ namespace rv::core {
 // instrumento por dia traz ticker, ISIN, tipo, fator de cotação e preço. É o que permite ao
 // replay reconstruir a tabela inteira sem abrir arquivo nenhum — o requisito de I12.
 struct InstrumentTable {
+  // O id que o INGRESS atribuiu, guardado ao lado do slot interno.
+  //
+  // São dois espaços de nome diferentes e é fácil confundi-los — um teste os confundiu, e o
+  // sintoma foi um `NotFound` obscuro. O log fala `external_id`; a memória fala `slot`. A
+  // tradução acontece uma vez, em `intern_instrument`, e esta coluna é o caminho de volta: quem
+  // percorre as colunas SoA (o escritor do snapshot, uma ferramenta de depuração, um teste)
+  // precisa saber a que instrumento do log cada linha corresponde.
+  uint32_t* external_id = nullptr;
   char (*symbol)[12] = nullptr;
   char (*isin)[12] = nullptr;
   uint8_t* type = nullptr;

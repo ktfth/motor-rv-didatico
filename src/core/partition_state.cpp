@@ -14,7 +14,8 @@ template <class T>
 }  // namespace
 
 bool InstrumentTable::init(Arena& a, uint32_t cap) noexcept {
-  const bool ok = coluna(a, symbol, cap) && coluna(a, isin, cap) && coluna(a, type, cap) &&
+  const bool ok = coluna(a, external_id, cap) && coluna(a, symbol, cap) &&
+                  coluna(a, isin, cap) && coluna(a, type, cap) &&
                   coluna(a, price_factor, cap) && coluna(a, lot_size, cap) &&
                   coluna(a, closing_price, cap) && coluna(a, previous_close, cap) &&
                   coluna(a, closing_date, cap);
@@ -91,6 +92,7 @@ uint32_t PartitionState::intern_instrument(uint32_t external_id) noexcept {
     // de marca sem custar um campo. Um instrumento citado por um negócio antes de `ClosingPriceSet`
     // ganha a linha — para que o cadastro possa preenchê-la depois — mas o negócio é rejeitado
     // (Err::InstrumentNotDescribed): sem o fator de cotação, `grossAmount` sairia errado (I7).
+    instruments.external_id[slot_novo] = external_id;
     instruments.price_factor[slot_novo] = 0;
     instruments.lot_size[slot_novo] = 0;
     ++instruments.count;

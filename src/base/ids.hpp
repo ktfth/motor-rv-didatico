@@ -101,7 +101,7 @@ struct DateYmd {
     const unsigned yoe = static_cast<unsigned>(y - era * 400);              // [0, 399]
     const unsigned doy = static_cast<unsigned>((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;             // [0, 146096]
-    return static_cast<int32_t>(era * 146097 + static_cast<int>(doe) - 719468);
+    return era * 146097 + static_cast<int32_t>(doe) - 719468;
   }
 
   static constexpr DateYmd from_day_index(int32_t z) noexcept {

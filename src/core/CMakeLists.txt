@@ -4,6 +4,7 @@ add_library(rv_core STATIC
   ledger.cpp
   outbox.cpp
   partition_state.cpp
+  state_image.cpp
 )
 add_library(rv::core ALIAS rv_core)
 target_link_libraries(rv_core PUBLIC rv::base rv::codec)

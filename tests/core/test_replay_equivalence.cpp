@@ -49,6 +49,7 @@ uint32_t impressao(const core::PartitionState& s) {
   add(s.account_first_trade, sizeof(uint32_t) * na);
 
   const uint32_t ni = s.instruments.count;
+  add(s.instruments.external_id, sizeof(uint32_t) * ni);
   add(s.instruments.symbol, 12 * ni);
   add(s.instruments.isin, 12 * ni);
   add(s.instruments.type, ni);
