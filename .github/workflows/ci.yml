@@ -140,9 +140,27 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            ninja-build cmake clang clang-tidy liburing-dev libssl-dev libfmt-dev libzstd-dev \
-            libgtest-dev libgmock-dev python3
+            ninja-build cmake liburing-dev libssl-dev libfmt-dev libzstd-dev \
+            libgtest-dev libgmock-dev python3 wget gnupg lsb-release software-properties-common
+
+      # O clang-tidy 18, que é o do Ubuntu 24.04, CRASHA analisando src/app/simulador_main.cpp
+      # ("PLEASE submit a bug report"). É defeito da ferramenta, não do código: o 22 passa limpo.
+      # Fixar a versão aqui é preferível a excluir o arquivo — excluir esconderia o arquivo de toda
+      # análise futura por causa de um bug que será corrigido.
+      - name: clang-tidy ${{ env.TIDY }} (o 18 do Ubuntu quebra)
+        env:
+          TIDY: "20"
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          sudo add-apt-repository -y "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-$TIDY main"
+          sudo apt-get install -y --no-install-recommends clang-$TIDY clang-tidy-$TIDY
+          clang-tidy-$TIDY --version
+
       - name: configurar
-        run: cmake --preset tidy
+        run: |
+          cmake --preset tidy \
+            -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
+            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-20
       - name: analisar
         run: cmake --build --preset tidy
