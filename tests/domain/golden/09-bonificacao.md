@@ -40,7 +40,7 @@ fiscal.
     quantidade     = 143 ações
 
     preco_medio = 44793900 × 1e12 / 14300000000 = 3.132.440.559,44  (1e-8)
-                → HALF_UP                        = 3132440559       (R$ 31,32440559)
+                → HALF_EVEN                      = 3132440559       (R$ 31,32440559)
 
 O preço médio **cai**, como tem de cair: mais ações pelo mesmo custo mais R$ 72,00.
 

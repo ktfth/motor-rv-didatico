@@ -56,7 +56,7 @@ Recálculo no passo 5, sobre a posição que a compra criou:
     custo compra = 3.000,00 + 4,00     = R$ 3.004,00
     quantidade   = 237 ações
     preco_medio  = 7.411,39 / 237      = 31,27168776371308...
-                 → HALF_UP em 1e-8     = 3127168776
+                 → HALF_EVEN em 1e-8   = 3127168776
 
 **O ponto sutil**: o preço médio é recalculado sobre 237 ações (137 + 100), **não** sobre 187
 (137 + 100 − 50). A venda do passo 3 não retira custo da posição — retira quantidade de

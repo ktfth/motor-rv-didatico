@@ -58,7 +58,7 @@ Recalculado **uma vez**, na perna de compra:
     custo antes  = 137 × 32,17072993 = R$ 4.407,39
     custo compra = R$ 3.004,00
     quantidade   = 237
-    preco_medio  = 7.411,39 / 237 = 3127168776  (HALF_UP, igual ao cenário 03)
+    preco_medio  = 7.411,39 / 237 = 3127168776  (HALF_EVEN, igual ao cenário 03)
 
 A perna de venda não toca o preço médio, mesmo sendo day trade. O ganho de day trade
 (R$ 3.115,75 − 100 × 31,27168776 = R$ −11,42) é assunto do módulo de IR (ADR-0011), que tem regra

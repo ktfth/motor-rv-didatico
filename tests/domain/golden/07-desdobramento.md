@@ -20,7 +20,7 @@ desdobramento na proporção 1:10, data-com 20260910, data-ex 20260911.
 | Política | Valor |
 |---|---|
 | `TRUNC` | `321707299` |
-| `HALF_UP` | `321707299` (a parte fracionária é 0,3 → arredonda para baixo) |
+| `HALF_EVEN` | `321707299` (a parte fracionária é 0,3 → arredonda para baixo) |
 
 As duas coincidem aqui; o cenário 08 escolhe números onde não coincidem, de propósito.
 

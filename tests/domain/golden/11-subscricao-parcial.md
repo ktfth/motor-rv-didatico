@@ -29,7 +29,7 @@ edital — também campo do evento.
     quantidade   = 163
 
     preco_medio = 49793900 × 1e12 / 16300000000 = 3.054.840.490,7975
-                → HALF_UP                        = 3054840491   (R$ 30,54840491)
+                → HALF_EVEN                      = 3054840491   (R$ 30,54840491)
 
 O preço médio cai porque R$ 25,00 é menor que R$ 31,32 — subscrição abaixo do preço médio dilui o
 custo. Se o preço de emissão fosse maior, subiria. O teste cobre os dois lados exatamente para que

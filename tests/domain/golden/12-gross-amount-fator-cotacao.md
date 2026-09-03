@@ -37,11 +37,15 @@ vem do evento `CotacaoFechada`, não de leitura externa no momento da resposta (
 | Política | Valor em 1e-4 | R$ |
 |---|---|---|
 | `TRUNC` | `1691356` | 169,1356 |
-| `HALF_UP` | `1691357` | 169,1357 |
+| `HALF_EVEN` | `1691357` | 169,1357 |
 
-**Decisão: `HALF_UP`**, e a função chama-se `gross_amount_half_up`. Motivo: é o arredondamento
-comercial usual e o mesmo que a apuração de posição da B3 aplica; truncar produz, na soma de uma
-carteira grande, um viés sistemático para baixo no total exibido ao investidor.
+**Decisão: `HALF_EVEN`**, e a função chama-se `notional_half_even`. O `grossAmount` é somado: a
+API expõe posição por investimento e o investidor soma a carteira. Truncar dá viés para baixo em
+toda posição; meio-para-cima dá viés para cima em todo empate. Só `HALF_EVEN` tem erro esperado
+zero na soma — e é a soma, não a parcela, que o investidor confere contra o extrato.
+
+Aqui a parte descartada é `0,79`, não é empate: as três políticas de arredondamento "para o mais
+próximo" concordam. O empate está na tabela de testes abaixo, de propósito.
 
 **O intermediário é `__int128` e a divisão acontece uma única vez, no fim.** Dividir por
 `priceFactor` antes de multiplicar por `qty` daria `123456700000/1000 = 123456700` — exato neste
@@ -62,7 +66,8 @@ O teste percorre uma tabela de `(qty, closingPrice, priceFactor)` que inclui, de
 | Caso | Por que está na tabela |
 |---|---|
 | fator 1, valores exatos | caminho comum, sem arredondamento |
-| fator 1000, resto 0,5 exato | a fronteira do `HALF_UP` (empate) |
+| fator 1000, resto 0,5 exato, parte inteira **par** | empate: `HALF_EVEN` mantém, `HALF_UP` sobe |
+| fator 1000, resto 0,5 exato, parte inteira **ímpar** | empate: as duas sobem — é o par de casos que fixa a política |
 | fator 1000, resto 0,4999… | logo abaixo do empate |
 | `qty` de uma posição inteira da B3 (≈ 10⁹ ações) | prova que `__int128` não estoura |
 | `closingPrice` no máximo representável em 1e-8 | idem |

@@ -23,12 +23,22 @@ Em escala 1e-8, `3217072992,700...` **não é exato**: é aqui que a política m
 | Política | Valor em escala 1e-8 | R$ |
 |---|---|---|
 | `TRUNC` (em direção a zero) | `3217072992` | 32,17072992 |
-| `HALF_UP` | `3217072993` | 32,17072993 |
+| `HALF_EVEN` | `3217072993` | 32,17072993 |
 
-**Decisão do domínio**: preço médio usa `HALF_UP`, e a função chama-se
-`weighted_average_price_half_up`. Motivo: o preço médio alimenta a apuração de ganho (ADR-0011) e
-o snapshot; truncar sistematicamente cria viés de custo para baixo, ou seja, ganho para cima,
-sempre na mesma direção. Meio-para-cima distribui o erro.
+**Decisão do domínio**: preço médio usa `HALF_EVEN` (arredondamento bancário), e a função
+chama-se `average_price_half_even`. Duas razões, nesta ordem:
+
+1. **Truncar tem viés de direção única.** O preço médio é base de custo e alimenta a apuração de
+   ganho (ADR-0011). Truncar sempre baixa o custo, ou seja, sempre aumenta o ganho tributável —
+   um erro que nunca se compensa.
+2. **Meio-para-cima tem viés de magnitude.** `HALF_UP` empurra todo empate para cima; somando
+   milhões de posições, o erro esperado é positivo. `HALF_EVEN` manda metade dos empates para
+   cima e metade para baixo, e o erro esperado da soma é zero.
+
+Aqui as duas dão `3217072993` — a parte descartada é `0,7`, não é empate. O caso que distingue as
+políticas está na tabela de testes: `…992,5` vai para `…992` em `HALF_EVEN` (992 é par) e para
+`…993` em `HALF_UP`. O teste inclui os dois lados do empate justamente porque, se incluísse só
+este cenário, trocar a política não quebraria nada.
 
 **O que NÃO se faz**: recomputar `preco_medio` a partir de `custo_total / quantidade` guardando
 apenas `preco_medio`. O estado guarda `preco_medio` (escala 1e-8) e o teste verifica que aplicar a

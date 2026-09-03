@@ -10,8 +10,17 @@ Convenções (ADR-0007, `docs/dominio.md`):
   `3245000000`.
 - BRL financeiro: `int64` escala 1e-4 → `R$ 3.245,00` = `32450000`.
 - datas: `uint32` AAAAMMDD.
-- arredondamento: toda operação que perde casa declara a política no nome da função. Nos cenários
-  abaixo, `HALF_UP` significa meio para cima em valor absoluto; `TRUNC` significa em direção a zero.
+- arredondamento: toda operação que perde casa declara a política **no nome da função**. As três
+  políticas em uso, e onde cada uma vale:
+
+  | Política | Significado | Onde | Por quê |
+  |---|---|---|---|
+  | `HALF_EVEN` | mais próximo; empate vai para o par | `notional_half_even` (I7, `grossAmount`), `average_price_half_even` (I4) | são números **somados**; só half-even tem erro esperado zero na soma |
+  | `HALF_UP` | mais próximo; empate para cima em valor absoluto | `fee_half_up` (corretagem, emolumentos, taxa de liquidação) | convenção de tarifa: o meio centavo vai para cima |
+  | `TRUNC` | em direção a zero | `withhold_trunc` (IRRF), `scale_qty_trunc` (grupamento) | reter a maior seria cobrar imposto que não é devido; grupamento não pode criar quantidade |
+
+  Nenhum dos 14 cenários abaixo cai em empate — os empates estão nas tabelas de teste de cada
+  operação, exatamente para que trocar a política quebre algum teste.
 
 Cada arquivo `NN-*.md` traz: contexto, eventos de entrada, estado esperado e **qual invariante
 (I1..I7) o cenário exerce**. O teste correspondente vive em `tests/domain/` e cita o arquivo.
