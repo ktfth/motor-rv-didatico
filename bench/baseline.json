@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "status": "sem baseline — fixar na fase 2 (desempenho)",
+  "limiar_regressao_pct": 5,
+  "ambiente": { "commit": null, "maquina": null, "kernel": null, "flags": null, "dispositivo_wal": null },
+  "metricas": {
+    "nucleo.eventos_por_s_por_core": null,
+    "wal.append_para_duravel_us": { "p50": null, "p99": null, "p999": null },
+    "wal.tamanho_grupo_bytes": { "p50": null, "p99": null },
+    "wal.grupos_em_voo": { "p50": null, "max": null },
+    "wal.recuperacao_s": null,
+    "snapshot.duracao_ms": null,
+    "rs.latencia_por_endpoint_ms": {}
+  }
+}
