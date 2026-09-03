@@ -1,3 +1,30 @@
+> ## Status deste documento — leia antes de usá-lo
+>
+> Este é um documento de **desenho**, produzido por um painel de arquitetura e revisado por cinco
+> críticos adversariais (59 defeitos apontados, 22 classificados como bloqueantes). Ele é a melhor
+> descrição disponível do que o motor *deveria* ser.
+>
+> **Ele não descreve linha a linha o código que existe hoje.** Onde os dois discordam, **o código
+> com teste verde manda** — e a divergência é informação, não erro a ser apagado. As principais,
+> conhecidas e deliberadas:
+>
+> | Ponto | Neste documento | No código |
+> |---|---|---|
+> | janela de liquidação | anel de 8 slots com `DateYmd` no slot | 3 slots + bucket `overdue` explícito (`src/core/ledger.hpp`) |
+> | backend de I/O | `concept` puro | híbrido: template em produção, virtual para o harness — **ADR-0024** |
+> | catálogo de eventos | campos revisados pelos críticos | `schema/events.xml`, que é o que o gerador consome |
+> | `mix64` | `base/hash.hpp` | `base/ids.hpp`, congelada, com `static_assert` de valores fixos |
+>
+> A revisão estrutural do próprio documento também apontou incoerências internas — aridade
+> divergente de `end_drain`, `DrainView` sem `begin()/end()`, namespace errado em
+> `RequestContext::snapshot`, e uma contradição sobre `is_fatal()` ser tabela ou comparação. Elas
+> **não foram corrigidas**: estão listadas aqui para que ninguém implemente a partir delas sem
+> perceber. A lista completa está no relatório do workflow que gerou este arquivo.
+>
+> **Como usar:** como fonte de ideias e de justificativas para as partes ainda não construídas
+> (WAL completo, recuperação, snapshot de exposição, borda FAPI). Para as partes construídas, leia
+> `docs/leitura-guiada.md` e o código.
+
 # CONTRATO INTERNO — motor-rv
 
 **Documento de costura.** Fixa nomes, assinaturas e fronteiras para que vários agentes escrevam

@@ -24,6 +24,19 @@ class Lcg {
   uint64_t s_;
 };
 
+// Copia um texto para um campo SBE de largura fixa: zera e copia o que couber.
+//
+// Não é `strncpy`. O campo do schema é preenchido com NUL até o fim e NÃO é terminado em NUL — um
+// ticker de doze caracteres ocupa os doze bytes. `strncpy` faz exatamente isso, e é por isso que o
+// GCC avisa (`stringop-truncation`): o aviso é para quem LÊ, que pode tratar o campo como string.
+// Escrever a cópia explicitamente deixa a intenção no código em vez de num aviso silenciado.
+template <std::size_t N>
+void copia_campo_fixo(char (&destino)[N], const std::string& origem) noexcept {
+  const std::size_t n = origem.size() < N ? origem.size() : N;
+  std::memset(destino, 0, N);
+  std::memcpy(destino, origem.data(), n);
+}
+
 template <class T>
 void empurra(std::vector<EventoRoteado>& v, PartitionId p, const T& m) {
   EventoRoteado e{};
@@ -150,8 +163,8 @@ void gera(const ConfigSimulacao& cfg, const std::vector<Instrumento>& instrument
         e.lot_size = instrumentos[i].lote;
         e.closing_price = preco[i];
         e.previous_close = anterior_preco;
-        std::strncpy(e.symbol, instrumentos[i].ticker.c_str(), sizeof e.symbol);
-        std::strncpy(e.isin, instrumentos[i].isin.c_str(), sizeof e.isin);
+        copia_campo_fixo(e.symbol, instrumentos[i].ticker);
+        copia_campo_fixo(e.isin, instrumentos[i].isin);
         e.type = instrumentos[i].tipo;
         empurra(saida, PartitionId{static_cast<uint16_t>(k)}, e);
       }

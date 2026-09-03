@@ -19,7 +19,7 @@ struct alignas(8) WalHdr {   // 32 bytes, little-endian
   uint64_t ts_ns;    // auditoria; ignorado no replay
   uint32_t epoch;    // aleatório por segmento
   uint16_t tmpl;     // templateId SBE
-  uint16_t len;      // bytes do payload SBE (≤ 64 KiB)
+  uint16_t len;      // bytes do payload SBE (≤ 65535 — `len` é uint16: 64 KiB exatos daria 0)
 };                   // payload, padding até múltiplo de 8
 ```
 
@@ -157,6 +157,14 @@ Distribuição de tamanho de grupo; latência append→durável (P50/P99/P999); 
 bytes/s; duração do snapshot; tempo de recuperação medido. Referência: 1M eventos/s de replay
 e 10M eventos/dia por partição → RTO ~10 s com snapshot só no EOD; é o número que decide se a
 v2 fuzzy vale.
+
+## Correções
+
+**Limite de payload: 65535, não 64 KiB.** O texto original dizia "≤ 64 KiB". Como `len` é
+`uint16_t`, um payload de exatamente 65536 bytes seria gravado com `len == 0` e o registro voltaria
+do disco vazio, sem violar CRC nenhum — o pior tipo de erro possível num log. `kMaxPayload` vale
+65535 em `src/wal/wal_format.hpp`, com `static_assert` amarrando ao tipo. Achado ao implementar o
+formato; a diferença de uma palavra é a diferença entre um limite e um estouro silencioso.
 
 ## Decisões fechadas
 

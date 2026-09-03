@@ -32,3 +32,4 @@ add_dependencies(rv_codec rv_codec_gen)
 # à mão, e mover um arquivo de um lado para o outro não muda nenhuma linha de include.
 target_include_directories(rv_codec PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(rv_codec PUBLIC rv::base)
+target_link_libraries(rv_codec PRIVATE motor_rv::hot)

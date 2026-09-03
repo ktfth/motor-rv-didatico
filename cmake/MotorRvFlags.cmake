@@ -49,6 +49,13 @@ endif()
 # ------------------------------------------------------- flags só do hot path
 # Núcleo, WAL e codecs. A borda NÃO usa: ela precisa de exceções (OpenSSL, parsing) e não é
 # medida pelo baseline de eventos/s.
+#
+# IMPORTANTE: os alvos ligam `motor_rv::hot` como **PRIVATE**. Ele carrega `-march`, `-O3` e
+# `-fno-exceptions`, que são propriedades das unidades de compilação DAQUELA camada — não de quem
+# a consome. Com `PUBLIC`, `-fno-exceptions` vazava por transitividade para `rv_ingress`, que lê
+# arquivo com `std::ifstream` e converte com `std::stoul`: o `release` quebrava, e quebrava só no
+# `release`, porque o `debug` não liga a flag. Descoberto rodando a matriz inteira de presets — e
+# é a razão de a matriz existir.
 add_library(motor_rv_hot INTERFACE)
 add_library(motor_rv::hot ALIAS motor_rv_hot)
 target_link_libraries(motor_rv_hot INTERFACE motor_rv::flags)

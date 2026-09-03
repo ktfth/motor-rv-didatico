@@ -28,6 +28,7 @@ ADR aceito é imutável (hook). Para mudar uma decisão: ADR novo com 'substitui
 | ADR-0021 | [Harness de medição próprio que escreve `bench/baseline.json`](0021-harness-de-bench-proprio.md) |
 | ADR-0022 | [Baseline `x86-64-v2`; `-march=native` só em preset opcional](0022-baseline-x86-64-v2.md) |
 | ADR-0023 | [Backend de I/O do WAL plugável (io_uring \| pwrite), escolhido em compilação](0023-backend-de-io-plugavel.md) |
+| ADR-0024 | [Backend de I/O híbrido: `WalT<B>` por template, base virtual só para os testes](0024-io-backend-hibrido.md) — substitui a mecânica de ADR-0023 |
 
 ## Nota sobre 0017–0023
 
