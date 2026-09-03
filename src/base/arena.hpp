@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <type_traits>
 
 #include "base/status.hpp"
 
@@ -38,10 +39,20 @@ class Arena {
     return base_ + off;
   }
 
+  // A arena devolve memória CRUA: ela não roda construtor nem destrutor. A exigência real,
+  // portanto, é que `T` seja seguro de tratar como bytes e não precise de destruição — não que
+  // seu construtor padrão seja trivial.
+  //
+  // A primeira versão exigia `is_trivially_default_constructible`, e isso rejeitava
+  // `struct Lsn { uint64_t v = 0; }` — um tipo perfeitamente POD, cujo único "pecado" é ter
+  // inicializador de membro. Exigir demais de um invariante é tão ruim quanto exigir de menos:
+  // empurra quem escreve o código a remover o inicializador (perdendo a inicialização segura) ou
+  // a contornar a arena. Quem chama continua responsável por zerar o que alocou; `coluna()` em
+  // `core/ledger.cpp` mostra o padrão.
   template <class T>
   [[nodiscard]] T* alloc_array(size_t count) noexcept {
-    static_assert(std::is_trivially_default_constructible_v<T>,
-                  "a arena não roda construtor: o estado da partição é POD por construção");
+    static_assert(std::is_trivially_copyable_v<T>, "a arena trata a memória como bytes");
+    static_assert(std::is_trivially_destructible_v<T>, "a arena nunca chama destrutor");
     return static_cast<T*>(allocate(sizeof(T) * count, alignof(T)));
   }
 
