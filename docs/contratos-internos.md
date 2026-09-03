@@ -1275,7 +1275,7 @@ struct TradeRecord {
   uint64_t trade_id;  Qty qty;  uint32_t account; uint32_t instrument;
   uint32_t settlement_date; TradeState state; uint8_t side; uint8_t _pad[2];
 };
-static_assert(sizeof(TradeRecord) == 40 && std::has_unique_object_representations_v<TradeRecord>);
+static_assert(sizeof(TradeRecord) == 32 && std::has_unique_object_representations_v<TradeRecord>);
 class TradeBook { /* índice denso trade_id → TradeRecord, arena própria, poda por DayOpened */ };
 }
 
@@ -1301,7 +1301,7 @@ struct ExceptionRecord {
   uint32_t instrument;
   uint32_t date;
   Err      reason;
-  uint16_t _pad;
+  uint16_t _pad[3];
 };
 static_assert(sizeof(ExceptionRecord) == 48 && std::has_unique_object_representations_v<ExceptionRecord>);
 class ExceptionQueue { /* arena própria; drenada pelo loop; copiada no stall-and-copy */ };
@@ -1653,7 +1653,7 @@ struct alignas(kSegmentHeaderBytes) SegmentHeader {   // OCUPA O PRIMEIRO BLOCO 
   uint64_t created_ts_ns;
   uint32_t epoch;
   uint32_t block_size; uint8_t block_size_origin;     // 0 = statx, 1 = fallback 4096, 2 = config
-  uint8_t  _pad[kSegmentHeaderBytes - 73];
+  uint8_t  _pad[kSegmentHeaderBytes - 65];
 };
 static_assert(sizeof(SegmentHeader) == kSegmentHeaderBytes);
 
@@ -1890,7 +1890,7 @@ struct alignas(kStateHeaderBytes) StateHeader {
   uint64_t reference_digest;
   uint64_t outbox_seq;            // para o replay reproduzir os mesmos `seq` (§3.8)
   uint32_t base_date, prev_business_date;
-  uint32_t engine_build_id; uint32_t file_bytes_hi_unused;
+  uint32_t engine_build_id; uint32_t reserved0;
   uint64_t file_bytes; uint64_t created_ts_ns;
   StateSectionRef sections[static_cast<size_t>(StateSection::Count)];
   uint8_t  reserved[/* até kStateHeaderBytes */];
@@ -2201,7 +2201,7 @@ struct ExposureHeader {
   uint64_t   state_digest;           // == EodMarked.state_digest — fecha a cadeia log→estado→exposição
   uint64_t   custody_checksum;       // idênticos aos de EodMarked{base_date}
   uint64_t   cash_checksum;
-  uint32_t   engine_build_id;
+  uint32_t   engine_build_id;  uint32_t reserved0;
   uint64_t   created_ts_ns;
   uint64_t   file_bytes;
   uint32_t   block_size;  uint8_t block_size_origin;  uint8_t flags;  uint16_t section_count;
@@ -2226,7 +2226,7 @@ struct MovementRecord {
   int64_t  withheld_tax_raw;   // golden 10: o IRRF do JCP "fica registrado no movimento"
   uint32_t instrument; uint32_t date;
   uint8_t  type; uint8_t side; uint16_t flags;
-  uint32_t reserved;
+  uint32_t reserved[3];
 };
 static_assert(sizeof(MovementRecord) == 80);   // passou de 64 de propósito: ver a nota abaixo
 struct BlobRef { uint64_t offset; uint32_t len; uint32_t crc32c; };
@@ -2908,3 +2908,115 @@ Sequência das fases de `docs/plano-fases.md`: Onda 0 + 1 = fase 1; Onda 2 = fas
 - **B3 e B4 antes de `core`, `ingress` e `wal`.** Os três dependem dos tamanhos exatos.
 - **Nada mede antes do baseline.** ADR-0016: `desempenho` fixa `bench/baseline.json` na fase 2, e só
   ele escreve nele.
+
+---
+
+## 8. Pendências que este documento levanta (para o orquestrador virar ADR)
+
+As pendências de ADR-0017..0023 do desenho anterior estão **resolvidas**: os sete ADRs existem em
+`docs/adr/` (gerador SBE próprio, JSON próprio, HTTP próprio, JOSE sobre OpenSSL, harness de bench,
+baseline `x86-64-v2`, backend de I/O plugável). O que sobra, e o que este documento acrescentou:
+
+1. **`Fixed<Escala, Unidade>` em vez de `Fixed<int64_t, escala>`.** Desvio deliberado de
+   `CODING_RULES §2`, justificado em §3.2: sem a tag de unidade, `Qty` e `Price` seriam o mesmo tipo
+   e `notional(price, qty)` compilaria. O `Raw` continua sendo `int64_t`, como ADR-0007 exige, então
+   o parâmetro removido não carregava informação. Se o orquestrador preferir a forma de um
+   parâmetro, a alternativa é aceitar que `Qty` e `Price` sejam intercambiáveis.
+
+2. **Dados de referência versionados como pré-condição de determinismo.** `InstrumentId` e
+   `AccountId` vêm de um pacote cujo digest entra em `DayOpened.reference_digest` (§3.3).
+   Consequência assumida: **um investidor novo só passa a existir entre dias**. Cadastro intradiário
+   exigiria um evento a mais (`AccountRegistered`), que é decisão de domínio.
+
+3. **Bloqueio de custódia (`bloqueado`) não tem template na v1.** ADR-0010 exclui derivativos e BTC,
+   e a coluna existe apenas porque I1 e I13 a somam. A consequência está verificada por
+   `test_v1_blocked_always_zero.cpp` (§3.5). Quando garantia entrar em escopo: template novo (D7),
+   coluna escrevível, e um cenário golden que a exercite — hoje **nenhum** dos catorze o faz com
+   valor diferente de zero.
+
+4. **`FalhaEntrega` como `outcome` de `TradeSettled`**, com `original_settle_date` e o novo
+   `SettleOutcome::Penalty`, em vez de evento próprio, para manter o catálogo em dez templates.
+   Decisão de desenho tomada aqui; precisa de ratificação de `dominio-pos-negociacao`.
+
+5. **Alocação não cruza partição na v1** (§3.3). Se um dia cruzar, o caminho é um décimo-primeiro
+   template de transferência entre partições, produzido pelo outbox da origem e consumido pelo
+   ingress do destino, com o mesmo tratamento de LSN e durabilidade de I10 — e com deduplicação por
+   `(partition, seq)`, porque a entrega do outbox é ao-menos-uma-vez (§3.8).
+
+6. **`EodMarked` é produzido pela própria partição** (§3.3) — a única exceção ao contrato "o ingress
+   produz, a partição consome". É o que permite o log ser auto-verificável offline, com
+   `state_digest` tomado sem corrida. Precisa estar registrado, porque é uma exceção a uma regra
+   estrutural.
+
+7. **`DocumentId` como CPF/CNPJ exato em 64 bits, não hash.** Consequência: o WAL guarda CPF em
+   claro, coberto por ADR-0015 (cifra no dispositivo). Confirmar com o regulatório que basta.
+
+8. **`ClosingPriceSet` acumula cadastro de instrumento e cotação de fechamento**, para que o replay
+   não leia arquivo externo (I12). Confirmar com o domínio que o arquivo de fechamento da B3 traz
+   todos os campos usados, e que `price_factor` e `lot_size` vêm sempre preenchidos.
+
+9. **Persistência dos contadores de limite operacional (R16)** fora do WAL, no processo do resource
+   server: arquivo mapeado com `msync`, chaveado por `(consent_urn, endpoint, yyyymm)` em horário de
+   Brasília. Junto: confirmar 423 vs 429 no manual vigente.
+
+10. **Formato do `investmentId`** (UUID v5 sobre documento + símbolo) precisa ser conferido contra a
+    API Recursos antes da fase 4 — R15 exige igualdade com o `resourceId`.
+
+11. **`docs/arquitetura.md` §Stack e §Otimizações contradizem `docs/ambiente.md`** (citam Asio/Beast,
+    glaze, simdjson, jwt-cpp, `sbe-tool`, Google Benchmark e `-march=x86-64-v3`, que gera SIGILL na
+    máquina). Este documento segue `ambiente.md` e os ADRs 0017–0023 — fato medido vence desenho.
+    `docs/arquitetura.md` precisa de uma nota apontando para eles, senão um agente novo tentará
+    linkar biblioteca que não existe. `CODING_RULES §6` ("codecs gerados por `sbe-tool`") já foi
+    reconciliado por ADR-0017 na própria seção de conflitos do arquivo.
+
+12. **`.claude/ownership.json` cobre `src/core`, `src/edge`, `src/wal`.** Este desenho acrescenta
+    `src/base`, `src/codec`, `src/json`, `src/expose`, `src/ingress`, `src/tools`, `src/app`.
+    Sugestão: `base`, `codec`, `ingress`, `tools`, `app` → `nucleo` (com veto de
+    `dominio-pos-negociacao` sobre `rounding.hpp` e `schema/events.xml`); `json`, `expose` →
+    `borda-fapi`, com veto de `persistencia` (formato) e de `regulatorio-open-finance` (semântica de
+    campo).
+
+### Correções que este documento faz nos artefatos existentes
+
+Não são pendências de ADR: são erratas a aplicar, e cada uma já está justificada acima.
+
+| Artefato | Correção | Onde está o porquê |
+|---|---|---|
+| `tests/domain/golden/02` | o nome da operação é `average_price_half_even`, não `weighted_average_price_half_up` (C4 fixou half-even, e o próprio texto argumenta contra half-up) | §3.2 |
+| `tests/domain/golden/01` | a linha "Invariante I1 no fechamento" usa o enunciado **antigo** (`+ a_liquidar_compra − a_liquidar_venda`); com a correção C1 o valor é o mesmo (100) porque nada está pendente, mas a fórmula escrita está errada | §3.5 |
+| `tests/domain/golden/08` | acrescentar um passo com `sobras` **não-zero na entrada**, para exercitar o reescalonamento que C6 exige — nenhum dos catorze cenários encadeia sobras com mudança de unidade | §3.2 |
+| `tests/domain/golden/12` | acrescentar a linha que mostra de **quais buckets** vieram os 137 (é a soma de I1), e registrar a exceção do preço médio: `notional` divide uma vez, `average_price` arredonda o custo antigo antes | §3.2, §3.10 |
+| `tests/domain/golden/10` | a verificação 3 (`qty_basis` é a posição na data-com) passa a ser conferência de tolerância contra `com_date`, que agora é campo do evento | §3.4 |
+| `docs/rastreabilidade.md` | R14 deixa de ser "`base_date` = `prev_business_date`"; passa a ser "`base_date` = `EodMarked.date`, e o RS nunca serve `base_date >= hoje`" | §3.10 |
+| `docs/invariantes.md` | preencher a coluna "Teste" das treze linhas com os rótulos de §6.1 — `check_invariants.py` reprova o build enquanto houver `—` | §6.1 |
+| `src/base/ids.hpp` | remover `day_index()`/`from_day_index()`: com o anel de datas, ninguém os chama, e sua existência convida de volta o índice de calendário que colide (§3.3) | §3.3, §3.5 |
+| `src/core/ledger.hpp` | `kSettlementSlots = 3` + `overdue_buy/overdue_sell` separados viram o anel de oito slots datados de §3.5, com `overdue` como marca de slot; as datas saem da posição e vão para `PartitionState` | §3.5 |
+
+---
+
+## Apêndice — as dez decisões que este documento tomou entre alternativas
+
+Uma linha por decisão, com o porquê, para quem for revisar sem ler tudo.
+
+1. **Anel de oito slots com a data guardada, por partição** — em vez de módulo sobre índice de
+   calendário (colide em 40 % dos pregões) ou índice de dia útil (correto, mas exige calendário
+   dentro do núcleo, que o golden 06 manda manter fora).
+2. **Preço médio em dois passos nomeados** — porque a divisão única, que é a forma mais limpa,
+   reprova os goldens 09 e 11 por uma unidade em 1e-8, e os goldens são normativos.
+3. **`apply_factor_floor` sobre `disponivel + sobras`** — porque C6 põe `sobras` na unidade corrente,
+   e desdobramento e grupamento mudam a unidade corrente.
+4. **Evento carrega fato externo; `apply` calcula; a conferência é "verifica, não recalcula"** —
+   C2 aplicado ao catálogo inteiro, não só a `new_avg_price`.
+5. **`EodMarked` produzido pela partição** — a alternativa (ingress produzindo checksums do estado)
+   quebra shared-nothing e tem corrida inerente; a exceção é uma linha escrita, o defeito seria
+   permanente.
+6. **`concept IoBackend` + template** — porque ADR-0023 já decidiu isso e registrou a virtual como
+   alternativa rejeitada; reabrir exigiria ADR novo com números.
+7. **Fila de exceção em `PartitionState`, não em `ApplyContext`** — porque o golden 14 exige que ela
+   sobreviva ao snapshot, e o que sobrevive ao snapshot é estado.
+8. **Alocação não cruza partição na v1** — é o que os goldens assumem, e a alternativa custa um
+   template novo mais deduplicação entre partições.
+9. **`quantity` exposto = identidade I1** — porque é o que a depositária guarda e é contra o extrato
+   da depositária que o investidor confere; I13 é outro campo, se for exposto.
+10. **`base_date` = `EodMarked.date`** — porque o campo tem de dizer a que dia o conteúdo pertence;
+    "D-1" é a relação entre o arquivo e o dia em que o RS serve, não um campo do arquivo.
