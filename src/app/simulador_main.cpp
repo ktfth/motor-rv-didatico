@@ -81,10 +81,23 @@ int main(int argc, char** argv) {
     else if (a == "--dados" && tem) dados = argv[++i];
     else { uso(); return a == "--help" || a == "-h" ? 0 : 2; }
   }
+  // Toda opção numérica é validada. `--investidores 0` chegava a `Lcg::below(0)`, que faz
+  // `next() % 0`: SIGFPE, sem mensagem. Um binário de demonstração que morre com sinal em vez de
+  // dizer o que está errado ensina a coisa errada sobre o projeto.
   if (!ingress::Partitioner::is_valid_count(cfg.particoes)) {
-    std::fprintf(stderr, "--particoes tem de ser potência de dois (recebi %u)\n", cfg.particoes);
+    std::fprintf(stderr, "--particoes tem de ser potência de dois entre 1 e 65536 (recebi %u)\n",
+                 cfg.particoes);
     return 2;
   }
+  struct Limite { const char* nome; uint32_t valor; uint32_t minimo; };
+  for (const Limite& l : {Limite{"--dias", cfg.dias, 1}, Limite{"--negocios", cfg.negocios_por_dia, 1},
+                          Limite{"--investidores", cfg.investidores, 1}}) {
+    if (l.valor < l.minimo) {
+      std::fprintf(stderr, "%s tem de ser >= %u (recebi %u)\n", l.nome, l.minimo, l.valor);
+      return 2;
+    }
+  }
+  if (cfg.um_em_n_invalidos == 0 || cfg.um_em_n_falhas == 0) return 2;
 
   std::vector<ingress::Instrumento> instrumentos;
   std::vector<ingress::DiaDePregao> calendario;
@@ -174,11 +187,25 @@ int main(int argc, char** argv) {
     }
   }
   std::printf("  I3  (bucket não negativo)  : %s\n", violacoes == 0 ? "ok" : "VIOLADO");
+  uint64_t soma_custodia = 0, soma_caixa = 0;
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
+    const uint64_t c = nucleos[k]->estado.custody_checksum();
+    const uint64_t x = nucleos[k]->estado.cash_checksum();
+    soma_custodia += c;
+    soma_caixa += x;
     std::printf("  partição %u  custódia=%016" PRIx64 "  caixa=%016" PRIx64 "  LSN=%" PRIu64 "\n", k,
-                nucleos[k]->estado.custody_checksum(), nucleos[k]->estado.cash_checksum(),
-                nucleos[k]->estado.applied_lsn.v);
+                c, x, nucleos[k]->estado.applied_lsn.v);
   }
+  // A SOMA atravessa as partições, e é o número mais forte que esta ferramenta imprime.
+  //
+  // Cada checksum é uma soma sobre as posições de uma partição; somando todas, obtém-se a soma
+  // sobre TODAS as posições do sistema — um conjunto que não depende de em quantos cores ele foi
+  // dividido. Logo o total tem de ser o mesmo com 1, 2, 4 ou 8 partições. Se mudar, ou o
+  // roteamento por documento deixou de ser função pura, ou algum evento foi aplicado no core
+  // errado. É um gate de CI de uma linha para a promessa central de ADR-0005.
+  std::printf("  TOTAL       custódia=%016" PRIx64 "  caixa=%016" PRIx64
+              "   (não deve depender de --particoes)\n",
+              soma_custodia, soma_caixa);
 
   std::printf("\n== imagem de recuperação (stall-and-copy) ==\n");
   for (uint32_t k = 0; k < cfg.particoes; ++k) {

@@ -63,7 +63,7 @@ class Engine {
                               const codec::CustodyReconciledDivergence* div, uint16_t n) {
     alignas(8) static std::byte buf[4096];
     std::memcpy(buf, &cab, sizeof cab);
-    codec::GroupHeader gh{static_cast<uint16_t>(sizeof(codec::CustodyReconciledDivergence)), n};
+    codec::GroupHeader gh{static_cast<uint16_t>(sizeof(codec::CustodyReconciledDivergence)), n, 0};
     std::memcpy(buf + sizeof cab, &gh, sizeof gh);
     std::memcpy(buf + sizeof cab + sizeof gh, div,
                 sizeof(codec::CustodyReconciledDivergence) * n);

@@ -49,7 +49,10 @@ class PairIndex {
     uint32_t i = slot(hi, lo);
     for (uint32_t passos = 0; passos <= mask_; ++passos) {
       if (ocupado_[i] == 0) {
-        if (size_ * 10 >= static_cast<uint64_t>(cap_) * 7) {
+        // `size_ * 10` era calculado em uint32 e SÓ DEPOIS alargado: transborda a partir de
+        // 429 milhões de elementos. Fora de alcance hoje, e exatamente o tipo de limite que
+        // ninguém revisita quando a capacidade cresce. O clang-tidy achou os dois.
+        if (static_cast<uint64_t>(size_) * 10 >= static_cast<uint64_t>(cap_) * 7) {
           overflow = true;
           return false;
         }

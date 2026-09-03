@@ -49,6 +49,7 @@ bool PartitionState::init(Arena& a, PartitionId pid, const PartitionCapacity& c)
   if (!instrument_index.init(a, c.instruments)) return false;
   if (!trade_index.init(a, c.trades)) return false;
   if (!applied_actions.init(a, c.corporate_actions_per_gen)) return false;
+  if (!applied_income.init(a, c.corporate_actions_per_gen)) return false;
 
   if (!coluna(a, account_first_trade, c.accounts)) return false;
   if (!coluna(a, account_document, c.accounts)) return false;
@@ -69,6 +70,7 @@ bool PartitionState::init(Arena& a, PartitionId pid, const PartitionCapacity& c)
 // mesmo prefixo de log produz os mesmos ids, em qualquer máquina, em qualquer replay (I12).
 // Um contador global, um relógio ou um hash do endereço dariam ids diferentes a cada execução.
 uint32_t PartitionState::intern_account(DocumentId doc) noexcept {
+  if (cash.count >= cash.capacity) return DenseIndex::kEmpty;
   bool novo = false;
   const uint32_t id_novo = cash.count;
   const uint32_t r = account_index.insert_or_get(doc.v, id_novo, novo);
@@ -83,6 +85,7 @@ uint32_t PartitionState::intern_account(DocumentId doc) noexcept {
 }
 
 uint32_t PartitionState::intern_instrument(uint32_t external_id) noexcept {
+  if (instruments.count >= instruments.capacity) return DenseIndex::kEmpty;
   bool novo = false;
   const uint32_t slot_novo = instruments.count;
   const uint32_t r = instrument_index.insert_or_get(external_id, slot_novo, novo);
@@ -102,6 +105,7 @@ uint32_t PartitionState::intern_instrument(uint32_t external_id) noexcept {
 
 uint32_t PartitionState::intern_position(uint32_t account, uint32_t instrument) noexcept {
   const uint64_t chave = (static_cast<uint64_t>(account) << 32) | instrument;
+  if (custody.count >= custody.capacity) return DenseIndex::kEmpty;
   bool novo = false;
   const uint32_t slot_novo = custody.count;
   const uint32_t r = position_index.insert_or_get(chave, slot_novo, novo);
@@ -152,15 +156,19 @@ uint64_t PartitionState::cash_checksum() const noexcept {
   return s;
 }
 
-void PartitionState::push_exception(const ExceptionRecord& r) noexcept {
+void PartitionState::push_exception(const ExceptionRecord& r, bool marca_divergencia) noexcept {
   // A fila é um buffer circular: quando enche, a entrada mais antiga é descartada e o contador
   // de descarte sobe. Encher a fila NÃO pode derrubar a partição — a fila existe para registrar
   // problemas, e um mecanismo de registro que derruba o processo quando há muitos problemas é o
   // pior comportamento possível exatamente no pior momento.
   if (exception_capacity == 0) return;
+  // O comentário acima prometia um contador de descarte e ele não existia: a fila sobrescrevia em
+  // silêncio, e `exception_count` (que conta PUSH, não ocupação) não distinguia "12 exceções" de
+  // "12 mil, das quais restam 256". Agora o descarte é contado e vai para o snapshot.
+  if (exception_count >= exception_capacity) ++exception_dropped;
   exceptions[exception_count % exception_capacity] = r;
   ++exception_count;
-  flags |= kFlagReconDivergence;
+  if (marca_divergencia) flags |= kFlagReconDivergence;
 }
 
 }  // namespace rv::core

@@ -84,6 +84,8 @@ uint32_t impressao(const core::PartitionState& s) {
                                 s.window.dates[2].v,
                                 s.flags,
                                 s.exception_count,
+                                s.exception_dropped,
+                                s.applied_income.size(),
                                 s.trades.count,
                                 s.custody.count,
                                 s.cash.count,

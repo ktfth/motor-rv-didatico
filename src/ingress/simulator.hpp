@@ -11,15 +11,26 @@
 //      `data/calendario-b3-2026.csv`, e vai gravada no evento. O motor nunca a recalcula — se
 //      recalculasse, leria arquivo durante o replay e violaria I12.
 //
-// O simulador emite os eventos na ordem que o contrato de ordenação exige:
-//   `DayOpened` → um `ClosingPriceSet` por instrumento → negócios → alocações → nets →
-//   liquidações → eventos corporativos e proventos → reconciliação → `EodMarked`.
+// O simulador emite os DEZ templates, na ordem que o contrato de ordenação exige:
+//
+//   DayOpened → ClosingPriceSet (um por instrumento) → TradeSettled (o que vence hoje, da janela
+//   da câmara, que fecha antes do pregão) → TradeExecuted + TradeAllocated (o pregão de hoje) →
+//   BatchNetted (o net da câmara para D+2) → DividendPaid → CorporateActionApplied →
+//   CustodyReconciled → EodMarked.
+//
+// Para emitir `BatchNetted` e `TradeSettled` ele precisa saber o que o motor VAI calcular — esses
+// eventos carregam números que o motor confere, e um net divergente vira `AmountMismatch`. Então o
+// simulador mantém os três mapas mínimos (net por conta e data, pernas por liquidar, posição
+// liquidada) e refaz a conta com as MESMAS funções de `base/rounding.hpp`. Que os dois cheguem ao
+// mesmo número em cem mil eventos é o teste cruzado mais barato que existe: duas implementações
+// independentes da mesma aritmética.
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "codec/events.hpp"
+#include "codec/sbe_runtime.hpp"
 #include "core/partition.hpp"
 #include "ingress/partitioner.hpp"
 

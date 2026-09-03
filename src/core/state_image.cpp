@@ -34,6 +34,7 @@ Status save_state_image(const PartitionState& s, const std::byte* arena_base, Mu
   h.instrument_count = s.instruments.count;
   h.trade_count = s.trades.count;
   h.exception_count = s.exception_count;
+  h.exception_dropped = s.exception_dropped;
   h.account_index_size = s.account_index.size();
   h.position_index_size = s.position_index.size();
   h.instrument_index_size = s.instrument_index.size();
@@ -43,6 +44,11 @@ Status save_state_image(const PartitionState& s, const std::byte* arena_base, Mu
   h.actions_size1 = c.size1;
   h.actions_current = c.atual;
   h.actions_rotation_date = c.rotacao.v;
+  const auto ci = s.applied_income.counters();
+  h.income_size0 = ci.size0;
+  h.income_size1 = ci.size1;
+  h.income_current = ci.atual;
+  h.income_rotation_date = ci.rotacao.v;
   h.cap = s.cap;
   h.header_crc32c = crc_do_cabecalho(h);
 
@@ -84,6 +90,7 @@ Status load_state_image(PartitionState& s, Arena& arena, ByteSpan image) noexcep
   s.instruments.count = h.instrument_count;
   s.trades.count = h.trade_count;
   s.exception_count = h.exception_count;
+  s.exception_dropped = h.exception_dropped;
   s.account_index.restore_size(h.account_index_size);
   s.position_index.restore_size(h.position_index_size);
   s.instrument_index.restore_size(h.instrument_index_size);
@@ -91,6 +98,9 @@ Status load_state_image(PartitionState& s, Arena& arena, ByteSpan image) noexcep
   s.applied_actions.restore(
       TwoGenSet::Counters{h.actions_size0, h.actions_size1, h.actions_current,
                           DateYmd{h.actions_rotation_date}});
+  s.applied_income.restore(
+      TwoGenSet::Counters{h.income_size0, h.income_size1, h.income_current,
+                          DateYmd{h.income_rotation_date}});
   return kOk;
 }
 

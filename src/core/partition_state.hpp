@@ -126,15 +126,20 @@ struct PartitionState {
   DenseIndex position_index;     // (account << 32 | instrument) -> linha da custódia
   DenseIndex instrument_index;   // id externo do instrumento -> slot interno
   DenseIndex trade_index;        // trade_id -> linha da tabela de negócios
-  TwoGenSet applied_actions;     // (action_id, account) -> já aplicado (I6)
+  TwoGenSet applied_actions;     // (action_id, account) -> evento corporativo já aplicado (I6)
+  TwoGenSet applied_income;      // (action_id, account) -> provento já creditado (I6)
 
   uint32_t* account_first_trade = nullptr;  // cabeça da lista encadeada, por conta
   uint64_t* account_document = nullptr;     // AccountId -> documento (para o snapshot e a exceção)
 
   ExceptionRecord* exceptions = nullptr;
-  uint32_t exception_count = 0;
+  uint32_t exception_count = 0;     // quantas entraram, desde sempre
+  uint32_t exception_dropped = 0;   // quantas foram sobrescritas por a fila ser circular
   uint32_t exception_capacity = 0;
 
+  // `kFlagReconDivergence` só sobe por divergência de RECONCILIAÇÃO de custódia — é o que o
+  // cabeçalho do snapshot de exposição publica com esse nome. Falha de entrega e net divergente
+  // entram na fila de exceção sem ligá-la: uma flag que sobe por tudo não distingue nada.
   static constexpr uint32_t kFlagReconDivergence = 1U << 0;
   uint32_t flags = 0;
 
@@ -164,7 +169,8 @@ struct PartitionState {
   [[nodiscard]] uint64_t custody_checksum() const noexcept;
   [[nodiscard]] uint64_t cash_checksum() const noexcept;
 
-  void push_exception(const ExceptionRecord& r) noexcept;
+  // `marca_divergencia` só é verdadeiro para divergência de reconciliação de custódia.
+  void push_exception(const ExceptionRecord& r, bool marca_divergencia = false) noexcept;
 };
 
 }  // namespace rv::core

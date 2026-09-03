@@ -24,7 +24,10 @@
 
 namespace rv::format {
 
-inline constexpr uint32_t kExposureMagic = 0x31535652U;  // "RVS1"
+// "RVX1". O valor anterior, 0x31535652 ("RVS1"), é o MESMO magic do cabeçalho de segmento do WAL
+// — dois formatos persistentes de 4 KiB compartilhando o único byte que os distingue no primeiro
+// olhar. Um arquivo trocado passaria pelo primeiro portão de validação dos dois lados.
+inline constexpr uint32_t kExposureMagic = 0x31585652U;
 inline constexpr uint16_t kExposureVersion = 1;
 inline constexpr uint32_t kExposureHeaderBytes = 4096;
 inline constexpr uint32_t kSettlementSlots = 3;   // D+0, D+1, D+2 — igual ao núcleo

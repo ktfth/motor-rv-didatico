@@ -15,6 +15,15 @@ option(MOTOR_RV_LTO "Link-time optimization no baseline" OFF)
 option(MOTOR_RV_INVARIANT_ASSERTS "Asserts de invariante (I1..I12) dentro do apply" ON)
 option(MOTOR_RV_FUZZERS "Compila os alvos de fuzz da borda" OFF)
 option(MOTOR_RV_WERROR "Trata aviso como erro (CODING_RULES §9)" ON)
+option(MOTOR_RV_CLANG_TIDY "Roda clang-tidy em cada unidade de compilação" OFF)
+
+# O `.clang-tidy` da raiz é um arquivo cuidado — vinte checks ligados, oito desligados com o motivo
+# escrito — e por um tempo ninguém o executou. Ligado aqui, ele passa a rodar em cada TU do build.
+if(MOTOR_RV_CLANG_TIDY)
+  find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
+  set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--quiet")
+  message(STATUS "motor-rv: clang-tidy ligado (${CLANG_TIDY_EXE})")
+endif()
 
 # ---------------------------------------------------------------- flags comuns
 add_library(motor_rv_flags INTERFACE)
@@ -40,7 +49,12 @@ target_compile_definitions(motor_rv_flags INTERFACE
 
 if(MOTOR_RV_SANITIZER)
   # Sanitizer precisa das mesmas flags na compilação e no link, senão o runtime não entra.
-  target_compile_options(motor_rv_flags INTERFACE -fsanitize=${MOTOR_RV_SANITIZER} -g)
+  #
+  # `-fno-sanitize-recover=all` não é detalhe: por padrão o UBSan imprime o diagnóstico e CONTINUA.
+  # O processo termina com código 0, o CTest reporta `Passed`, e como os testPresets só mostram a
+  # saída em falha, a mensagem nunca aparece. O preset inteiro virava decoração.
+  target_compile_options(motor_rv_flags INTERFACE -fsanitize=${MOTOR_RV_SANITIZER}
+                                                  -fno-sanitize-recover=all -g)
   target_link_options(motor_rv_flags    INTERFACE -fsanitize=${MOTOR_RV_SANITIZER})
   # ASan e o hot path não convivem com -fno-exceptions + arenas sem redzone: o preset asan
   # desliga a otimização agressiva de propósito. Ver docs/ambiente.md.
@@ -86,7 +100,12 @@ if(MOTOR_RV_LTO)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_msg)
   if(_ipo_ok)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE PARENT_SCOPE)
+    # SEM `PARENT_SCOPE`. `include()` não cria escopo, então um `set()` simples já atinge o escopo
+    # de diretório do CMakeLists raiz — que é o que se quer. Com `PARENT_SCOPE`, a variável ia para
+    # o pai do escopo de topo, que não existe, e era descartada: o preset `release` anunciava LTO e
+    # nunca o ligou. Um gate que reporta verde sem ter feito nada é pior que gate nenhum.
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    message(STATUS "motor-rv: LTO ligado")
   else()
     message(WARNING "LTO pedido mas indisponível: ${_ipo_msg}")
   endif()

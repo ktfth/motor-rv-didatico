@@ -40,27 +40,32 @@ template <Rounding R>
   const i128 r = n % d;        // o sinal segue n
   if (r == 0) return static_cast<int64_t>(q);
 
+  // `TowardZero` sai aqui: `q` já está truncado, e o resto do cálculo — sinal e dobro do resto —
+  // só serve às políticas que arredondam. Antes isso era um ramo VAZIO no `if constexpr` mais
+  // abaixo; o clang-tidy o apontou como corpo repetido, e sair cedo é ao mesmo tempo mais claro e
+  // mais barato.
+  if constexpr (R == Rounding::TowardZero) {
+    return static_cast<int64_t>(q);
+  } else {
   const i128 sinal = (n < 0) ? -1 : 1;
   const i128 dobro = (r < 0 ? -r : r) * 2;   // < 2d, nunca estoura
 
-  if constexpr (R == Rounding::TowardZero) {
-    // nada a fazer: q já está truncado
-  } else if constexpr (R == Rounding::TowardNegInf) {
+  if constexpr (R == Rounding::TowardNegInf) {
     if (n < 0) q -= 1;
   } else if constexpr (R == Rounding::HalfUp) {
     if (dobro >= d) q += sinal;                  // empate vai para longe do zero
   } else {  // HalfEven
-    if (dobro > d) {
-      q += sinal;
-    } else if (dobro == d && (q % 2 != 0)) {
-      q += sinal;                                // empate vai para o par
-    }
+    // Passou do meio, sobe. Empatou exatamente no meio, sobe só se isso levar ao PAR — que é o
+    // que dá erro esperado zero na soma. As duas condições, escritas separadas, tinham o mesmo
+    // corpo, e o clang-tidy tinha razão: uma expressão só diz melhor a mesma regra.
+    if (dobro > d || (dobro == d && q % 2 != 0)) q += sinal;
   }
 
   const i128 kMax = static_cast<i128>(INT64_MAX);
   const i128 kMin = static_cast<i128>(INT64_MIN);
   if (q > kMax || q < kMin) panic_overflow("mul_div", a, b);
   return static_cast<int64_t>(q);
+  }
 }
 
 // ---------------------------------------------------------------- fatores de escala
@@ -114,7 +119,22 @@ inline constexpr int64_t kMoneyToQtyPrice = 1'000'000'000'000LL;  // o caminho d
   const Money custo_antigo = position_cost_half_even(q_old, p_old);
   const Money custo_total = custo_antigo + cost_add;
   const Qty q_nova = q_old + q_add;
-  if (q_nova.raw() <= 0) panic_precondition("average_price_half_even", "quantidade final > 0");
+
+  // Posição líquida não positiva não tem preço médio NESTE modelo, e devolver zero é a resposta,
+  // não uma falha.
+  //
+  // A primeira versão chamava `panic_precondition` aqui — e o cenário que a dispara é
+  // perfeitamente válido: uma venda a descoberto autorizada (I3 permite `disponivel` negativo)
+  // liquida antes da recompra, a posição possuída fica negativa, e a compra seguinte a leva de
+  // −63 para −53. Abortar o processo por um evento de mercado legítimo é indisponibilidade
+  // autoinfligida — foi o simulador completo, emitindo liquidação de verdade, que expôs isso na
+  // primeira execução.
+  //
+  // O custo de uma posição descoberta é assunto da apuração de ganho (ADR-0011, módulo separado),
+  // que consome o log e tem regra própria. O motor guarda a quantidade; o preço médio volta a
+  // existir quando a posição volta a ser positiva.
+  if (q_nova.raw() <= 0) return Price{};
+
   return Price::from_raw(
       mul_div<Rounding::HalfEven>(custo_total.raw(), kMoneyToQtyPrice, q_nova.raw()));
 }
@@ -137,6 +157,24 @@ inline constexpr int64_t kMoneyToQtyPrice = 1'000'000'000'000LL;  // o caminho d
   const int64_t inteiras = (total / Qty::kOne) * Qty::kOne;
   leftover = Qty::from_raw(total - inteiras);
   return Qty::from_raw(inteiras);
+}
+
+// Escala uma quantidade MANTENDO a fração. Para buckets em voo (`a_liquidar_compra`,
+// `a_liquidar_venda`, vencidos), que não vão a leilão.
+//
+// Por que eles não podem usar `scale_qty_trunc`: a fração que ela devolve vai para `sobras`, e
+// `sobras` entra em I1 — a quantidade guardada HOJE na depositária. Uma compra ainda em voo não
+// está lá. Mandar a fração dela para `sobras` produz divergência de reconciliação todos os dias,
+// que é exatamente o alarme falso que `tests/domain/golden/08` diz que não pode existir.
+//
+// E há um segundo motivo: `scale_qty_trunc` trunca em direção a zero, então sobre bucket NEGATIVO
+// — o caso que I3 permite, venda a descoberto autorizada — ela devolveria uma fração negativa, e
+// `sobras` negativo I3 não permite em hipótese alguma. Aqui não há fração devolvida, logo não há
+// como envenenar o bucket.
+[[nodiscard]] constexpr Qty scale_qty_keep_fraction(Qty q, uint32_t num, uint32_t den) noexcept {
+  if (num == 0 || den == 0) panic_precondition("scale_qty_keep_fraction", "num > 0 && den > 0");
+  return Qty::from_raw(mul_div<Rounding::TowardZero>(q.raw(), static_cast<int64_t>(num),
+                                                     static_cast<int64_t>(den)));
 }
 
 // Preço médio depois do evento: o inverso exato do fator da quantidade, para que o valor da

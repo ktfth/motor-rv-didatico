@@ -15,3 +15,8 @@ motor_rv_test(test_i2_cash_by_date
   FONTES  test_i2_cash_by_date.cpp
   LIGA    rv::core
   ROTULOS "I2;I5;dominio")
+
+motor_rv_test(test_allocation
+  FONTES  test_allocation.cpp
+  LIGA    rv::core
+  ROTULOS "I2;I3;I5;dominio;alocacao")

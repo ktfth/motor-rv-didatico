@@ -1,0 +1,148 @@
+# CI do motor-rv.
+#
+# Todo gate deste arquivo já existia como script no repositório e dependia de alguém digitar o
+# comando. Um gate que ninguém roda não é gate — e uma revisão independente mostrou dois que
+# reportavam VERDE sem ter feito nada (LTO nunca ligava; o preset tsan selecionava zero testes).
+# Por isso o CI não só roda: ele confere que os gates fizeram alguma coisa.
+
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [debug, release, clang-release, asan, tsan]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: dependências
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake clang liburing-dev libssl-dev libfmt-dev libzstd-dev \
+            libgtest-dev libgmock-dev python3
+          echo "cmake $(cmake --version | head -1)"
+          echo "gcc   $(g++ --version | head -1)"
+          echo "clang $(clang++ --version | head -1)"
+
+      - name: sondagem do ambiente
+        run: ./scripts/probe-ambiente.sh || true
+
+      - name: configurar
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: compilar
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: testar
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      # O preset `tsan` só tem valor se selecionar alguma coisa. O filtro apontava para um rótulo
+      # que nenhum CMakeLists declarava, e o CTest saía 0 tendo rodado zero testes.
+      - name: tsan roda mesmo o teste de concorrência
+        if: matrix.preset == 'tsan'
+        run: |
+          n=$(ctest --preset tsan-concorrencia -N | grep -c 'Test *#') || true
+          echo "testes com rótulo concorrencia: $n"
+          test "$n" -ge 1 || { echo "::error::o preset tsan não selecionou nenhum teste"; exit 1; }
+          ctest --preset tsan-concorrencia --output-on-failure
+
+      # `release` anuncia LTO. Já anunciou sem ligar.
+      - name: release liga LTO de verdade
+        if: matrix.preset == 'release'
+        run: |
+          cmake --preset release 2>&1 | tee /tmp/cfg.txt
+          grep -q "LTO ligado" /tmp/cfg.txt || { echo "::error::LTO não ligou"; exit 1; }
+
+  gates:
+    name: gates do projeto
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: dependências
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake liburing-dev libssl-dev libfmt-dev libzstd-dev \
+            libgtest-dev libgmock-dev python3
+      - run: cmake --preset debug && cmake --build --preset debug
+
+      # "Invariante sem teste não existe" (docs/invariantes.md) — mecanizado.
+      - name: todo invariante tem teste
+        run: python3 scripts/check_invariants.py build/debug
+
+      # O calendário é dado de entrada; se o gerador mudar, as datas dos cenários golden mudam.
+      - name: o calendário gerado é o versionado
+        run: |
+          python3 scripts/gera-calendario.py 2026 /tmp/cal.csv
+          diff -q /tmp/cal.csv data/calendario-b3-2026.csv \
+            || { echo "::error::data/calendario-b3-2026.csv difere do que o gerador produz"; exit 1; }
+
+      # O gerador de codecs recusa schema inválido — e recusar é metade do valor dele.
+      - name: o gerador SBE recusa schema inválido
+        run: |
+          python3 scripts/sbe_gen.py schema/events.xml --check
+          set +e
+          printf '%s\n' '<?xml version="1.0"?>' \
+            '<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe" package="p" id="1" version="1">' \
+            '<types/><sbe:message name="A" id="1"><field name="x" id="1" type="double"/></sbe:message>' \
+            '</sbe:messageSchema>' > /tmp/ruim.xml
+          python3 scripts/sbe_gen.py /tmp/ruim.xml --check
+          test $? -ne 0 || { echo "::error::o gerador aceitou ponto flutuante"; exit 1; }
+
+      # A propriedade central do motor: mesma semente, mesmo resultado.
+      - name: determinismo do motor
+        run: |
+          ./build/debug/src/app/motor-rv-sim --dias 3 --negocios 3000 --investidores 400 > /tmp/a.txt
+          ./build/debug/src/app/motor-rv-sim --dias 3 --negocios 3000 --investidores 400 > /tmp/b.txt
+          diff -u /tmp/a.txt /tmp/b.txt \
+            || { echo "::error::o motor não é determinístico"; exit 1; }
+          grep -q "I3  (bucket não negativo)  : ok" /tmp/a.txt \
+            || { echo "::error::I3 violado na simulação"; exit 1; }
+          # A soma da tabela de rejeições tem de bater com o total: relatório incompleto mente.
+          grep -q "NAO BATE COM O TOTAL" /tmp/a.txt \
+            && { echo "::error::contagem de rejeições inconsistente"; exit 1; }
+          cat /tmp/a.txt
+
+      # A quantidade de partições não pode mudar o resultado agregado do motor.
+      # ADR-0005, verificado: o estado agregado não depende de em quantos cores ele foi dividido.
+      #
+      # Não se compara "eventos aceitos": `DayOpened`, `ClosingPriceSet`, `CustodyReconciled` e
+      # `EodMarked` são emitidos POR partição, então esse número cresce com o particionamento e
+      # cresce corretamente. O que tem de ser idêntico é a soma dos checksums — que percorre o
+      # mesmo conjunto de posições em qualquer arranjo — e a contagem de rejeições.
+      - name: o estado agregado não depende do número de partições
+        run: |
+          for n in 1 2 4 8; do
+            ./build/debug/src/app/motor-rv-sim --dias 2 --negocios 2000 --investidores 300 \
+              --particoes $n > /tmp/p$n.txt
+            printf '%s %s\n' "$(grep '^  TOTAL' /tmp/p$n.txt | sed 's/.*custódia=//')" \
+                              "$(grep -E '^tot' /tmp/p$n.txt | awk '{print $3}')"
+          done | tee /tmp/part.txt
+          test "$(sort -u /tmp/part.txt | wc -l)" -eq 1 \
+            || { echo "::error::o estado agregado mudou com o número de partições"; cat /tmp/part.txt; exit 1; }
+
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: dependências
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake clang clang-tidy liburing-dev libssl-dev libfmt-dev libzstd-dev \
+            libgtest-dev libgmock-dev python3
+      - name: configurar com clang-tidy
+        run: cmake --preset debug -DMOTOR_RV_CLANG_TIDY=ON
+      - name: analisar
+        run: cmake --build --preset debug

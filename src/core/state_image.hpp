@@ -51,6 +51,7 @@ struct StateImageHeader {
   uint32_t instrument_count;
   uint32_t trade_count;
   uint32_t exception_count;
+  uint32_t exception_dropped;
 
   uint32_t account_index_size;
   uint32_t position_index_size;
@@ -61,6 +62,10 @@ struct StateImageHeader {
   uint32_t actions_size1;
   uint32_t actions_current;
   uint32_t actions_rotation_date;
+  uint32_t income_size0;
+  uint32_t income_size1;
+  uint32_t income_current;
+  uint32_t income_rotation_date;
 
   PartitionCapacity cap;      // a configuração: restaurar exige a MESMA
   uint32_t header_crc32c;

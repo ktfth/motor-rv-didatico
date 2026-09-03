@@ -22,7 +22,17 @@ Checks: >
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-avoid-do-while,
   -misc-include-cleaner,
-  -bugprone-easily-swappable-parameters
+  -bugprone-easily-swappable-parameters,
+  -misc-non-private-member-variables-in-classes,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
+  -portability-avoid-pragma-once,
+  -modernize-use-designated-initializers,
+  -readability-braces-around-statements,
+  -readability-math-missing-parentheses,
+  -readability-uppercase-literal-suffix,
+  -cppcoreguidelines-pro-bounds-constant-array-index
 
 # Por que os quatro desligados no fim:
 #   pro-bounds-pointer-arithmetic e pro-type-reinterpret-cast: o decodificador SBE e o mmap do
@@ -31,6 +41,24 @@ Checks: >
 #     importa; forçar a regra em teste de golden só produz constante sem sentido.
 #   easily-swappable-parameters: quantidade e preço são ambos int64 por construção (ADR-0007);
 #     a proteção real é o tipo forte Fixed<>, não o aviso.
+#
+# E os desligados depois de rodar a ferramenta pela primeira vez — 900 avisos, dos quais 6 eram
+# defeito. Cada um destes contradiz uma decisão que o projeto tomou com motivo escrito:
+#   non-private-member-variables: as colunas SoA são dados públicos POR DEFINIÇÃO. Encapsulá-las
+#     em acessores é o oposto do que o layout existe para fazer (docs/leitura-guiada.md §5).
+#   avoid-c-arrays: `char symbol[12]`, `SectionRef sections[27]`, `Qty pending[n*3]` são LAYOUT de
+#     formato persistente, com static_assert de tamanho. `std::array` mudaria o que está no disco.
+#   avoid-pragma-once: `#pragma once` é escolha do projeto e está em todos os cabeçalhos.
+#   use-designated-initializers: os structs de mensagem são gerados; a forma da inicialização é do
+#     gerador, não de quem escreve.
+#   braces-around-statements e math-missing-parentheses: 431 avisos de estilo, zero defeitos. O
+#     `.clang-format` já governa a forma.
+#   uppercase-literal-suffix e pro-bounds-constant-array-index: idem.
+#
+# O que a primeira execução ACHOU e que valeu por ela toda: duas multiplicações em `uint32`
+# alargadas só depois para `uint64` (transbordo a partir de 429 milhões de elementos, em
+# `dense_index.hpp` e `pair_index.hpp`) e três retornos de `fprintf` descartados sem dizer que era
+# de propósito. Ferramenta boa, com muito ruído — a calibração é o que a torna utilizável.
 
 WarningsAsErrors: 'bugprone-*,cert-*,clang-analyzer-*,concurrency-*,performance-*'
 

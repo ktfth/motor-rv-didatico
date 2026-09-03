@@ -32,17 +32,31 @@ using namespace rv::codec;
 
 // Em debug, uma violação de invariante aborta com o número na mão. Em release, ela vira o
 // `Status` que o chamador já trata — o número do invariante fica na métrica.
+// `RV_CHECK` afirma um invariante DEPOIS da mutação — é a rede de "isto não deveria ser possível",
+// não a validação da entrada. Toda rejeição de negócio acontece ANTES de mutar, explicitamente,
+// com o seu próprio `Err` (passo 3 do padrão descrito no topo do arquivo).
+//
+// A primeira versão passava um `Err` de rejeição aqui, e uma revisão independente mostrou o
+// estrago: em release, uma violação de I3 devolvia `NegativeBucket` — código 202, faixa de
+// REJEIÇÃO — depois de já ter mutado. A partição não parava, o outbox não congelava, e a posição
+// ficava envenenada: todo evento seguinte sobre ela era "rejeitado" já tendo aplicado seus efeitos.
+// Em debug, o mesmo evento abortava o processo. Mesmo log, resultados diferentes por build — o que
+// destrói a própria promessa de I11.
+//
+// Agora os dois ramos concordam sobre a CLASSE: violação de invariante depois da mutação é
+// corrupção, logo `StateCorrupt` (fatal). Debug aborta na hora para dar a pilha; release para a
+// partição e congela a saída. O que muda é quando se descobre, não o que significa.
 #if MOTOR_RV_INVARIANT_ASSERTS
-#define RV_CHECK(id, cond, err)                                     \
+#define RV_CHECK(id, cond)                                          \
   do {                                                              \
     if (!(cond)) {                                                  \
       panic_precondition("invariante " #id " em " __FILE__, #cond);  \
     }                                                               \
   } while (0)
 #else
-#define RV_CHECK(id, cond, err) \
-  do {                          \
-    if (!(cond)) return Status::fail(err); \
+#define RV_CHECK(id, cond)                              \
+  do {                                                  \
+    if (!(cond)) return Status::fail(Err::StateCorrupt); \
   } while (0)
 #endif
 
@@ -62,6 +76,25 @@ using namespace rv::codec;
   const Status st = ctx.outbox->stage(ev.lsn, OutKind::ReadModelUpdate,
                                       ByteSpan{reinterpret_cast<const std::byte*>(&u), sizeof u});
   return st.is_ok() ? kOk : Status::fail(Err::ArenaExhausted, static_cast<uint32_t>(pos));
+}
+
+// Desliga um negócio da lista encadeada de uma conta. Devolve false se ele não estava lá — o que
+// é informação, não erro silencioso: significa que a lista e `trades.account[]` divergiram.
+[[nodiscard]] bool unlink_trade(PartitionState& s, uint32_t conta, uint32_t t) noexcept {
+  uint32_t atual = s.account_first_trade[conta];
+  if (atual == TradeTable::kNil) return false;
+  if (atual == t) {
+    s.account_first_trade[conta] = s.trades.next_of_account[t];
+    return true;
+  }
+  while (s.trades.next_of_account[atual] != TradeTable::kNil) {
+    if (s.trades.next_of_account[atual] == t) {
+      s.trades.next_of_account[atual] = s.trades.next_of_account[t];
+      return true;
+    }
+    atual = s.trades.next_of_account[atual];
+  }
+  return false;
 }
 
 template <class T>
@@ -150,6 +183,7 @@ template <class T>
   s.prev_business_date = DateYmd{e.prev_business_date};
   // Poda do conjunto de idempotência por DATA DE EVENTO, nunca por relógio (I12 protegendo I6).
   s.applied_actions.maybe_rotate(s.business_date, s.cap.idempotency_window_days);
+  s.applied_income.maybe_rotate(s.business_date, s.cap.idempotency_window_days);
   return kOk;
 }
 
@@ -220,7 +254,7 @@ template <class T>
   bool novo = false;
   (void)s.trade_index.insert_or_get(e.trade_id, t, novo);
 
-  RV_CHECK(I3, s.custody.buckets_non_negative(pos), Err::NegativeBucket);
+  RV_CHECK(I3, s.custody.buckets_non_negative(pos));
   return publica_posicao(s, ctx, ev, pos);
 }
 
@@ -250,6 +284,15 @@ template <class T>
     return Status::fail(Err::OutsideSettlementWindow, e.settlement_date);
   }
 
+  // v1 NÃO fatia negócio (ADR-0025). O schema declara que `TradeAllocated` pode fatiar, mas
+  // fatiar exige criar uma linha nova na tabela de negócios — e mover só os buckets, mantendo uma
+  // linha só, quebra I2 nas duas contas: a soma dos negócios pendentes da origem continua contando
+  // o negócio inteiro enquanto o `a_liquidar` dela já perdeu a parcela. Rejeitar é explícito;
+  // aceitar pela metade seria errado em silêncio.
+  if (Qty::from_raw(e.qty) != s.trades.qty[t]) {
+    return Status::fail(Err::QtyMismatch, static_cast<uint32_t>(e.trade_id));
+  }
+
   // Alocação para a mesma conta é o caso comum (o investidor negocia direto) e não move bucket
   // nenhum — mas o evento AINDA assim tem de existir e avançar a máquina de estados, porque é ele
   // que fixa o titular. É a aresta `Executado -> Alocado` de docs/dominio.md, e o motivo pelo qual
@@ -262,22 +305,55 @@ template <class T>
     }
     const Qty q = Qty::from_raw(e.qty);
     const Money dinheiro = Money::from_raw(e.cash_amount);
-    if (e.side == static_cast<uint8_t>(Side::Buy)) {
-      s.custody.pending_buy[pos_de * kSettlementSlots + slot] -= q;
-      s.custody.pending_buy[pos_para * kSettlementSlots + slot] += q;
+    const bool compra = e.side == static_cast<uint8_t>(Side::Buy);
+    const uint32_t k_de = pos_de * kSettlementSlots + slot;
+    const uint32_t k_para = pos_para * kSettlementSlots + slot;
+
+    // ---- CHECAGENS ANTES DE QUALQUER MUTAÇÃO (passo 3 do padrão do arquivo) ----
+    //
+    // A primeira versão desta função não tinha nenhuma: era o único manipulador que mexia em
+    // quantidade sem verificar nada, e uma revisão independente mediu o efeito — alocar a perna de
+    // venda deixava `disponivel` do destino em −200 com a flag de descoberto desligada, violando I3
+    // sem que nenhum assert disparasse. O caminho `de != para` não era exercitado por teste algum:
+    // todos alocavam `doc → doc`.
+    if (compra) {
+      if (s.custody.pending_buy[k_de] < q) return Status::fail(Err::QtyMismatch, pos_de);
     } else {
-      s.custody.pending_sell[pos_de * kSettlementSlots + slot] -= q;
-      s.custody.pending_sell[pos_para * kSettlementSlots + slot] += q;
+      if (s.custody.pending_sell[k_de] < q) return Status::fail(Err::QtyMismatch, pos_de);
+      const bool destino_pode_descobrir =
+          (s.custody.flags[pos_para] & CustodyLedger::kShortAllowed) != 0;
+      if (!destino_pode_descobrir && s.custody.available[pos_para] < q) {
+        return Status::fail(Err::ShortSaleNotAllowed, pos_para);
+      }
+    }
+
+    // ---- daqui para baixo, muta ----
+    if (compra) {
+      s.custody.pending_buy[k_de] -= q;
+      s.custody.pending_buy[k_para] += q;
+    } else {
+      s.custody.pending_sell[k_de] -= q;
+      s.custody.pending_sell[k_para] += q;
       s.custody.available[pos_de] += q;   // devolve o que a execução reservou na origem
       s.custody.available[pos_para] -= q; // e reserva no destino
     }
     s.cash.pending[de * kSettlementSlots + slot] -= dinheiro;
     s.cash.pending[para * kSettlementSlots + slot] += dinheiro;
 
-    // A lista encadeada de negócios muda de dono junto com os buckets.
+    // O negócio muda de dono: sai da lista da origem, entra na do destino.
+    //
+    // A primeira versão só emendava no destino. O nó ficava nas DUAS listas, e como os laços de
+    // `BatchNetted` e `TradeSettled` percorriam `account_first_trade` sem conferir o dono, um lote
+    // da corretora avançava a máquina de estados de negócios que já eram do investidor. Desligar
+    // é O(negócios da origem); a alternativa seria uma lista duplamente encadeada, que custaria
+    // quatro bytes por negócio para acelerar uma operação rara.
+    (void)unlink_trade(s, de, t);
     s.trades.account[t] = para;
     s.trades.next_of_account[t] = s.account_first_trade[para];
     s.account_first_trade[para] = t;
+
+    RV_CHECK(I3, s.custody.buckets_non_negative(pos_de));
+    RV_CHECK(I3, s.custody.buckets_non_negative(pos_para));
   }
 
   s.trades.state[t] = static_cast<uint8_t>(proximo);
@@ -317,6 +393,8 @@ template <class T>
   uint32_t contados = 0;
   for (uint32_t t = s.account_first_trade[acct]; t != TradeTable::kNil;
        t = s.trades.next_of_account[t]) {
+    // Cinto de segurança: a corretude do laço não pode depender só da integridade da lista.
+    if (s.trades.account[t] != acct) continue;
     if (s.trades.settlement_date[t] != data) continue;
     const auto atual = static_cast<TradeState>(s.trades.state[t]);
     const TradeState proximo = next_state(atual, TradeTrigger::Net);
@@ -353,9 +431,17 @@ template <class T>
   const bool compra = e.side == static_cast<uint8_t>(Side::Buy);
   const auto resultado = static_cast<SettleOutcome>(e.outcome);
 
-  const TradeTrigger gatilho = resultado == SettleOutcome::Settled     ? TradeTrigger::Settle
-                               : resultado == SettleOutcome::BoughtIn  ? TradeTrigger::BuyIn
-                                                                       : TradeTrigger::Fail;
+  // `outcome` vem de fora. Sem esta validação, um valor fora da enumeração não casava com `case`
+  // nenhum, o `switch` abaixo não fazia nada, a máquina de estados era avançada com o gatilho
+  // `Fail` (a última alternativa do ternário original) e a função devolvia Ok — um evento
+  // inventado marcando negócios como falha de entrega.
+  TradeTrigger gatilho{};
+  switch (resultado) {
+    case SettleOutcome::Settled:         gatilho = TradeTrigger::Settle; break;
+    case SettleOutcome::DeliveryFailure: gatilho = TradeTrigger::Fail;   break;
+    case SettleOutcome::BoughtIn:        gatilho = TradeTrigger::BuyIn;  break;
+    default:                             return Status::fail(Err::InvalidArgument, e.outcome);
+  }
 
   switch (resultado) {
     case SettleOutcome::Settled: {
@@ -408,7 +494,11 @@ template <class T>
       // `Liquidado` — o histórico importa porque é ele que a API de movimentações expõe (R11).
       if (compra) {
         if (s.custody.overdue_buy[pos] < q) return Status::fail(Err::QtyMismatch);
+        // A contraparte finalmente entregou: a quantidade sai do vencido e ENTRA em `disponivel`.
+        // A primeira versão só decrementava `overdue_buy` — as ações sumiam do ledger, e nenhum
+        // invariante acusava, porque `overdue_buy` conta em I13 e `disponivel` também.
         s.custody.overdue_buy[pos] -= q;
+        s.custody.available[pos] += q;
       } else {
         if (s.custody.overdue_sell[pos] < q) return Status::fail(Err::QtyMismatch);
         s.custody.overdue_sell[pos] -= q;
@@ -422,6 +512,7 @@ template <class T>
   // Avança a máquina de estados dos negócios cobertos por esta liquidação.
   for (uint32_t t = s.account_first_trade[acct]; t != TradeTable::kNil;
        t = s.trades.next_of_account[t]) {
+    if (s.trades.account[t] != acct) continue;  // idem
     if (s.trades.instrument[t] != inst) continue;
     if (s.trades.settlement_date[t] != data) continue;
     if (s.trades.side[t] != e.side) continue;
@@ -429,7 +520,7 @@ template <class T>
     if (proximo != TradeState::None) s.trades.state[t] = static_cast<uint8_t>(proximo);
   }
 
-  RV_CHECK(I3, s.custody.buckets_non_negative(pos), Err::NegativeBucket);
+  RV_CHECK(I3, s.custody.buckets_non_negative(pos));
   return publica_posicao(s, ctx, ev, pos);
 }
 
@@ -448,6 +539,34 @@ template <class T>
   const uint32_t pos = s.intern_position(acct, inst);
   if (pos == DenseIndex::kEmpty) return Status::fail(Err::ArenaExhausted);
 
+  const auto tipo = static_cast<ActionType>(e.type);
+  const uint32_t num = e.factor_num;
+  const uint32_t den = e.factor_den;
+
+  // ---- VALIDAÇÃO ANTES DE CONSUMIR A CHAVE DE IDEMPOTÊNCIA ----
+  //
+  // A primeira versão inseria a chave e só depois validava. Um evento REJEITADO saía com a chave
+  // consumida para sempre: a correção do mesmo evento, reenviada, seria recusada como duplicata.
+  // Além de contradizer o passo 3 do padrão do arquivo ("rejeitar não muta nada"), isso deixava
+  // uma posição permanentemente sem o evento corporativo dela.
+  switch (tipo) {
+    case ActionType::Bonus:
+    case ActionType::Split:
+    case ActionType::ReverseSplit:
+      if (num == 0 || den == 0) return Status::fail(Err::InvalidArgument, e.type);
+      break;
+    case ActionType::Subscription:
+      if (e.qty_delta < 0) return Status::fail(Err::InvalidArgument, e.type);
+      break;
+    case ActionType::LeftoversAuction:
+      break;
+    default:
+      // `type` vem de fora e não é validado pelo decodificador: sem este ramo, um valor fora da
+      // enumeração não casava com `case` nenhum, o `switch` não fazia nada, e a função seguia
+      // creditando `withheld_tax` e devolvendo Ok — um evento inventado passando por bom.
+      return Status::fail(Err::InvalidArgument, e.type);
+  }
+
   // I6: idempotência por (evento, conta). A chave é EXATA — ver base/pair_index.hpp e por que
   // misturar os 96 bits em 64 não é aceitável quando o efeito de uma colisão é pular um evento
   // corporativo de um investidor.
@@ -457,47 +576,43 @@ template <class T>
     return Status::fail(Err::AlreadyApplied, static_cast<uint32_t>(e.action_id));
   }
 
-  const auto tipo = static_cast<ActionType>(e.type);
-  const uint32_t num = e.factor_num;
-  const uint32_t den = e.factor_den;
   const Qty base = s.custody.custody_today(pos);
   Qty delta_calculado{};
 
   switch (tipo) {
     case ActionType::Split:
     case ActionType::ReverseSplit: {
-      if (num == 0 || den == 0) return Status::fail(Err::InvalidArgument);
-      // O evento escala TODOS os buckets de quantidade: as ações pendentes de entrega ou de
-      // recebimento também se desdobram. Escalar só `disponivel` faria I1 deixar de fechar no
-      // primeiro desdobramento que pegasse um negócio em voo.
+      // Duas famílias de bucket, dois tratamentos — e a diferença é I1.
+      //
+      // POSSUÍDO (`disponivel`, `bloqueado`): a fração vai a leilão, logo vira `sobras`, que I1
+      // soma. IN VOO (`a_liquidar_*`, vencidos): a fração continua sendo do próprio bucket, e
+      // mandá-la para `sobras` faria a depositária divergir do motor todo dia.
       Qty sobra_total{};
       Qty s1{};
       s.custody.available[pos] = scale_qty_trunc(s.custody.available[pos], num, den, s1);
       sobra_total += s1;
       s.custody.blocked[pos] = scale_qty_trunc(s.custody.blocked[pos], num, den, s1);
       sobra_total += s1;
-      s.custody.overdue_buy[pos] = scale_qty_trunc(s.custody.overdue_buy[pos], num, den, s1);
-      sobra_total += s1;
-      s.custody.overdue_sell[pos] = scale_qty_trunc(s.custody.overdue_sell[pos], num, den, s1);
-      sobra_total += s1;
+
+      s.custody.overdue_buy[pos] = scale_qty_keep_fraction(s.custody.overdue_buy[pos], num, den);
+      s.custody.overdue_sell[pos] = scale_qty_keep_fraction(s.custody.overdue_sell[pos], num, den);
       for (uint32_t k = 0; k < kSettlementSlots; ++k) {
         const uint32_t j = pos * kSettlementSlots + k;
-        s.custody.pending_buy[j] = scale_qty_trunc(s.custody.pending_buy[j], num, den, s1);
-        sobra_total += s1;
-        s.custody.pending_sell[j] = scale_qty_trunc(s.custody.pending_sell[j], num, den, s1);
-        sobra_total += s1;
+        s.custody.pending_buy[j] = scale_qty_keep_fraction(s.custody.pending_buy[j], num, den);
+        s.custody.pending_sell[j] = scale_qty_keep_fraction(s.custody.pending_sell[j], num, den);
       }
-      // Sobras ficam na unidade CORRENTE (cenário golden 08): I1 as soma com `disponivel`, e uma
-      // soma exige unidade única.
+
+      // As sobras já existentes reescalam como quantidade possuída, e a fração da própria sobra
+      // se junta às demais (cenário golden 08: `sobras` fica sempre na unidade CORRENTE).
       s.custody.leftovers[pos] = scale_qty_trunc(s.custody.leftovers[pos], num, den, s1) + s1;
       s.custody.leftovers[pos] += sobra_total;
+
       // O preço médio anda no sentido inverso da quantidade: o valor da posição se conserva.
       s.custody.avg_price[pos] = scale_price_half_even(s.custody.avg_price[pos], num, den);
       delta_calculado = s.custody.custody_today(pos) - base;
       break;
     }
     case ActionType::Bonus: {
-      if (num == 0 || den == 0) return Status::fail(Err::InvalidArgument);
       Qty sobra{};
       const Qty total = scale_qty_trunc(base, num, den, sobra);
       const Qty inteiras = total - base;
@@ -516,7 +631,14 @@ template <class T>
     }
     case ActionType::Subscription: {
       const Qty exercida = Qty::from_raw(e.qty_delta);
-      if (exercida.raw() < 0) return Status::fail(Err::InvalidArgument);
+      // O direito é proporcional à posição: 1:4 vem como num=1, den=4. Exercer mais do que se tem
+      // direito é entrada inválida, e `tests/domain/golden/11` é explícito sobre isso — a primeira
+      // versão validava só o sinal e o teto nunca era calculado.
+      if (num != 0 && den != 0) {
+        Qty resto{};
+        const Qty direitos = scale_qty_trunc(base, num, den, resto);
+        if (exercida > direitos) return Status::fail(Err::QtyMismatch, static_cast<uint32_t>(pos));
+      }
       const Money desembolso = Money::from_raw(e.cash_delta);
       s.custody.avg_price[pos] =
           average_price_half_even(base, s.custody.avg_price[pos], exercida, desembolso);
@@ -528,9 +650,9 @@ template <class T>
     case ActionType::LeftoversAuction: {
       // O leilão da fração: a sobra sai, o dinheiro entra. O preço vem no evento, na unidade
       // corrente — nunca de uma conversão implícita aqui dentro.
+      delta_calculado = -s.custody.leftovers[pos];
       s.custody.leftovers[pos] = Qty{};
       s.cash.cash[acct] += Money::from_raw(e.cash_delta);
-      delta_calculado = Qty::from_raw(e.qty_delta);
       break;
     }
   }
@@ -545,7 +667,7 @@ template <class T>
                                      e.ex_date, static_cast<uint16_t>(Err::QtyMismatch), 0});
   }
 
-  RV_CHECK(I3, s.custody.buckets_non_negative(pos), Err::NegativeBucket);
+  RV_CHECK(I3, s.custody.buckets_non_negative(pos));
   return publica_posicao(s, ctx, ev, pos);
 }
 
@@ -580,6 +702,20 @@ template <class T>
     s.push_exception(ExceptionRecord{e.account, folga, e.instrument, e.ex_date,
                                      static_cast<uint16_t>(Err::AmountMismatch), 0});
     return Status::fail(Err::AmountMismatch, e.instrument);
+  }
+
+  // I6 também vale para provento: `docs/dominio.md` lista dividendo e JCP como eventos
+  // corporativos e `tests/domain/golden/10` declara "Exerce I6". A primeira versão não tinha
+  // idempotência nenhuma — `action_id` existia no schema e nunca era lido, e um arquivo da B3
+  // reentregue creditava o provento duas vezes.
+  //
+  // O conjunto é SEPARADO do de eventos corporativos, e não o mesmo com a chave torcida: um
+  // `action_id` de provento e um de desdobramento podem coincidir sem que um tenha a ver com o
+  // outro, e compartilhar o conjunto faria um cancelar o outro.
+  bool cheio_i = false;
+  if (!s.applied_income.insert(e.action_id, acct, cheio_i)) {
+    if (cheio_i) return Status::fail(Err::ArenaExhausted);
+    return Status::fail(Err::AlreadyApplied, static_cast<uint32_t>(e.action_id));
   }
 
   if (static_cast<IncomeStage>(e.stage) == IncomeStage::Accrued) {
@@ -631,7 +767,8 @@ template <class T>
 
   for (const auto& d : *g) {
     s.push_exception(ExceptionRecord{d.account, d.qty_delta, d.instrument, e.date,
-                                     static_cast<uint16_t>(Err::QtyMismatch), 0});
+                                     static_cast<uint16_t>(Err::QtyMismatch), 0},
+                     /*marca_divergencia=*/true);
   }
   return kOk;
 }

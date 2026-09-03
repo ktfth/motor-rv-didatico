@@ -83,10 +83,29 @@ enum class Err : uint16_t {
 // Um erro é fatal quando continuar significaria corromper: o ledger, o log ou o estado. Erro de
 // entrada externa nunca é fatal — derrubar a partição porque um terceiro mandou lixo transforma
 // o erro dele em indisponibilidade nossa.
+//
+// A regra é a FAIXA, mais uma lista curta e explícita. A primeira versão era só faixa, e o texto
+// de `core/apply.hpp` — que classifica "arena sem espaço" como fatal — discordava do número:
+// `ArenaExhausted` vale 2, cai em 1..99, e era tratado como rejeição. O efeito prático de ficar
+// sem arena e apenas "rejeitar" o evento é que a partição continua rodando com estado que ela não
+// conseguiu registrar, e os checksums de `EodMarked` passariam sem acusar nada.
+//
+// Duas fontes para a mesma decisão é o defeito; a lista explícita ao lado da faixa é a correção
+// honesta — a alternativa seria renumerar `ArenaExhausted`, e número de `Err` aparece em log e em
+// relatório de crash, logo é estável por contrato.
 [[nodiscard]] constexpr bool is_fatal(Err e) noexcept {
   const auto v = static_cast<uint16_t>(e);
-  return (v >= 250 && v < 300) || (v >= 350 && v < 400);
+  if (v >= 250 && v < 300) return true;   // núcleo: corrupção de estado ou de ordenação do log
+  if (v >= 350 && v < 400) return true;   // WAL: durabilidade comprometida
+  return e == Err::ArenaExhausted;        // ficar sem memória depois do warm-up é fatal
 }
+static_assert(is_fatal(Err::ArenaExhausted));
+static_assert(is_fatal(Err::LedgerOverflow) && is_fatal(Err::StateCorrupt));
+static_assert(is_fatal(Err::BadCrc) && is_fatal(Err::ShortWrite));
+static_assert(!is_fatal(Err::NegativeBucket) && !is_fatal(Err::ShortSaleNotAllowed));
+static_assert(!is_fatal(Err::WalFull), "contrapressão não é corrupção");
+static_assert(!is_fatal(Err::UnknownTemplate),
+              "template desconhecido pode vir do ingress; quem trata log corrompido é a recuperação");
 
 class [[nodiscard]] Status {
  public:

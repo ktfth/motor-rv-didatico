@@ -22,11 +22,19 @@ struct MessageHeader {
 };
 static_assert(sizeof(MessageHeader) == 8);
 
+// Oito bytes, não quatro — e o motivo é alinhamento, não folga.
+//
+// O bloco de toda mensagem é múltiplo de 8 (o gerador recusa o contrário). Com um cabeçalho de
+// grupo de 4 bytes, o corpo do grupo começava em `bloco + 4`, ímpar em 8: para `CustodyReconciled`
+// isso era `payload + 20`, e o primeiro campo de `Divergence` é um `uint64`. A leitura sem cópia
+// ficava desalinhada, e `view_group` — ao contrário de `view_bytes` — nem verificava.
+// Com 8 bytes, corpo de grupo alinhado é consequência do formato, não sorte.
 struct GroupHeader {
   uint16_t block_length;
   uint16_t num_in_group;
+  uint32_t reserved;
 };
-static_assert(sizeof(GroupHeader) == 4);
+static_assert(sizeof(GroupHeader) == 8);
 
 // Leitura sem cópia. As duas checagens não são paranoia: o payload vem de um arquivo que pode
 // estar truncado (cauda de escrita rasgada) e de um buffer cujo alinhamento depende do offset do
@@ -48,6 +56,9 @@ template <class Elem>
   const size_t n = (*gh)->num_in_group;
   const ByteSpan corpo = apos_bloco.subspan(sizeof(GroupHeader));
   if (corpo.size() < n * sizeof(Elem)) return Status::fail(Err::ShortPayload);
+  // A mesma checagem que `view_bytes` faz. Faltava aqui, e era justamente onde o desalinhamento
+  // acontecia.
+  if (!is_aligned(corpo.data(), alignof(Elem))) return Status::fail(Err::Misaligned);
   return std::span<const Elem>{reinterpret_cast<const Elem*>(corpo.data()), n};  // NOLINT
 }
 

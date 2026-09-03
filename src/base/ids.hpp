@@ -140,9 +140,10 @@ static_assert(DateYmd::from_ymd(2026, 9, 4).day_index() - DateYmd::from_ymd(2026
   return x;
 }
 
-// `n_partitions` é potência de dois: a máscara evita a divisão no caminho do ingress.
-[[nodiscard]] constexpr PartitionId partition_of(DocumentId doc, uint32_t n_partitions) noexcept {
-  return PartitionId{static_cast<uint16_t>(mix64(doc.v) & (n_partitions - 1))};
-}
+// O roteamento por partição NÃO mora aqui. Ele é decisão de FORMATO — mudá-la reordena o log de
+// todas as partições e invalida todo snapshot existente — e por isso mora num lugar só, congelado
+// com valores golden: `src/ingress/partitioner.hpp`. Havia uma segunda cópia da fórmula neste
+// arquivo, sem nenhum chamador e sem os `static_assert` que a protegem; duas verdades sobre uma
+// decisão de formato é o começo de um dia ruim.
 
 }  // namespace rv

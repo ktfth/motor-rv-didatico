@@ -7,10 +7,10 @@ da fase 1 (I1–I7) e da fase 2 (I8–I12).
 | Id | Invariante | Verificação | Teste |
 |---|---|---|---|
 | I1 | Para cada conta × instrumento: `disponivel + Σ a_liquidar_venda[D] + bloqueado + sobras` == posição na depositária no fechamento (**enunciado corrigido — ver "Correções"**) | `ReconciliacaoDepositaria` (EOD) e assert em debug | `test_apply_golden` |
-| I2 | Para cada conta e data D: `a_liquidar[D]` financeiro == soma dos negócios pendentes para D (net da câmara) | assert em debug após cada apply | `test_i2_cash_by_date` |
-| I3 | Nenhum bucket de quantidade negativo, exceto `disponivel` em venda a descoberto autorizada (flag explícita) | assert | `test_apply_golden` |
+| I2 | Para cada conta e data D: `a_liquidar[D]` financeiro == soma dos negócios pendentes para D (net da câmara) | assert em debug após cada apply | `test_i2_cash_by_date`, `test_allocation` |
+| I3 | Nenhum bucket de quantidade negativo, exceto `disponivel` em venda a descoberto autorizada (flag explícita) | assert | `test_apply_golden`, `test_allocation` |
 | I4 | `preco_medio` só muda em `Liquidado(compra)` e `EventoCorporativoAplicado`; nunca em venda | assert por tipo de evento | `test_rounding_golden`, `test_apply_golden` |
-| I5 | Toda transição da máquina de estados do negócio segue o grafo de `docs/dominio.md`; transição fora do grafo é rejeitada | teste de propriedade | `test_apply_golden`, `test_i2_cash_by_date` |
+| I5 | Toda transição da máquina de estados do negócio segue o grafo de `docs/dominio.md`; transição fora do grafo é rejeitada | teste de propriedade | `test_apply_golden`, `test_i2_cash_by_date`, `test_allocation` |
 | I6 | Evento corporativo aplica-se uma única vez por (evento, conta) | idempotência por chave | `test_apply_golden` |
 | I7 | `grossAmount` do snapshot == `qty × closingPrice / priceFactor` com arredondamento declarado | teste de golden | `test_rounding_golden` |
 | I8 | `lsn` é estritamente crescente por partição; sem lacunas no log válido | recuperação | `test_format` |
