@@ -15,6 +15,9 @@ Sete presets de build configuram, compilam e passam os testes:
 | `asan` / `tsan` / `fuzz` | sanitizers e libFuzzer |
 | `nativo` | `-march=native`, só para experimento |
 
+O CI (`.github/workflows/ci.yml`) roda os sete jobs a cada push: matriz de presets, os gates do
+projeto e o clang-tidy.
+
 ```sh
 ./scripts/bootstrap-toolchain.sh && export PATH="$PWD/.toolchain/bin:$PATH"
 cmake --preset debug && cmake --build --preset debug && ctest --preset debug
@@ -71,6 +74,21 @@ Em ordem de dependência:
 
 O script `/tmp/.../wf-borda.js` (referenciado nos logs de workflow) tem a especificação detalhada
 dos itens 4 e 5, escrita e pronta para reexecução.
+
+## Revisão de 03/09 e o que ela mudou
+
+`docs/revisao-2026-09-03.md` traz 45 achados de quatro revisores independentes (nenhum deles autor
+do código que revisou — é a regra de `CLAUDE.md`). **Trinta foram corrigidos**, cada um com teste ou
+gate; o que ficou está na tabela "O que ficou, e por quê" do mesmo arquivo.
+
+O padrão dos achados vale mais que a lista: o pior deles — quatro bugs em `apply_trade_allocated` —
+existia porque **nenhum teste exercitava aquele caminho**. Todos alocavam `doc → doc`, o ramo que
+não move bucket nenhum. Cobertura de linha não é cobertura de caminho.
+
+E dois gates reportavam **verde sem ter feito nada**: o LTO nunca ligava (`PARENT_SCOPE` dentro de
+arquivo `include()`d vai para um escopo que não existe) e o preset `tsan` filtrava por um rótulo que
+nenhum `CMakeLists` declarava, selecionando zero testes. Os dois estão consertados e o CI agora
+**confere que fizeram alguma coisa**, não só que saíram com código zero.
 
 ## Achados que mudaram o desenho
 
