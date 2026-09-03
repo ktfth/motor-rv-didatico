@@ -41,6 +41,13 @@ enum class Err : uint16_t {
   UnknownBatch = 204,
   AmountMismatch = 205,     // provento cujo bruto − irrf ≠ líquido (cenário golden 10)
   ShortSaleNotAllowed = 206,
+  // O instrumento existe no log mas ainda não foi DESCRITO (`ClosingPriceSet` não chegou), então
+  // o motor não conhece o fator de cotação. Negociar assim produziria dinheiro errado. É rejeição,
+  // não fatal: uma lacuna no arquivo de cadastro da B3 não pode derrubar a partição de um core
+  // inteiro — vira exceção registrada, e o negócio é reprocessado quando o cadastro chegar.
+  InstrumentNotDescribed = 207,
+  // Data de liquidação fora da janela D+0..D+2. Evento atrasado ou fora de ordem.
+  OutsideSettlementWindow = 208,
 
   UnknownInstrument = 250,  // fatal: quebra o contrato de ordenação do log
   UnknownAccount = 251,     // fatal: idem

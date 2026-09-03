@@ -5,3 +5,8 @@ motor_rv_test(test_rounding_golden
   FONTES  test_rounding_golden.cpp
   LIGA    rv::base
   ROTULOS "I4;I7;dominio;golden")
+
+motor_rv_test(test_apply_golden
+  FONTES  test_apply_golden.cpp
+  LIGA    rv::core
+  ROTULOS "I1;I3;I4;I5;I6;I13;dominio;golden")

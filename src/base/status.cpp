@@ -25,6 +25,8 @@ const char* to_string(Err e) noexcept {
     case Err::UnknownBatch: return "UnknownBatch";
     case Err::AmountMismatch: return "AmountMismatch";
     case Err::ShortSaleNotAllowed: return "ShortSaleNotAllowed(I3)";
+    case Err::InstrumentNotDescribed: return "InstrumentNotDescribed";
+    case Err::OutsideSettlementWindow: return "OutsideSettlementWindow";
     case Err::UnknownInstrument: return "UnknownInstrument[FATAL]";
     case Err::UnknownAccount: return "UnknownAccount[FATAL]";
     case Err::LedgerOverflow: return "LedgerOverflow[FATAL]";
