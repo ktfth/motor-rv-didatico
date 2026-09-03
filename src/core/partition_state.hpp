@@ -132,6 +132,13 @@ struct PartitionState {
 
   PartitionCapacity cap{};
 
+  // Quantos bytes da arena o ESTADO ocupa. É a fronteira da imagem de recuperação: o que vem
+  // depois na arena (outbox, buffers do WAL) é transitório e NÃO entra no snapshot — o que estava
+  // empilhado no outbox e não era durável nunca foi visto por ninguém, então perdê-lo é o
+  // resultado correto. Marcar a fronteira aqui é o que impede a imagem de arrastar junto memória
+  // que não é estado.
+  uint64_t arena_bytes = 0;
+
   // Constrói tudo a partir da arena e SELA. Falha se não couber — e falhar aqui é o objetivo:
   // é o teste de dimensionamento, rodando no warm-up de todo processo.
   [[nodiscard]] bool init(Arena& a, PartitionId pid, const PartitionCapacity& c) noexcept;

@@ -78,6 +78,7 @@ class PairIndex {
 
   [[nodiscard]] uint32_t size() const noexcept { return size_; }
   [[nodiscard]] uint32_t slots() const noexcept { return cap_; }
+  void restore_size(uint32_t n) noexcept { size_ = n; }
 
  private:
   [[nodiscard]] uint32_t slot(uint64_t hi, uint32_t lo) const noexcept {
@@ -135,6 +136,20 @@ class TwoGenSet {
 
   [[nodiscard]] uint32_t size() const noexcept { return gen_[0].size() + gen_[1].size(); }
   [[nodiscard]] DateYmd last_rotation() const noexcept { return rotacao_; }
+
+  struct Counters {
+    uint32_t size0, size1, atual;
+    DateYmd rotacao;
+  };
+  [[nodiscard]] Counters counters() const noexcept {
+    return Counters{gen_[0].size(), gen_[1].size(), atual_, rotacao_};
+  }
+  void restore(const Counters& c) noexcept {
+    gen_[0].restore_size(c.size0);
+    gen_[1].restore_size(c.size1);
+    atual_ = c.atual;
+    rotacao_ = c.rotacao;
+  }
 
  private:
   PairIndex gen_[2];

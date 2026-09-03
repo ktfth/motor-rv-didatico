@@ -74,6 +74,9 @@ class Arena {
   // Verdadeiro se algum pedido já não coube. O dimensionamento da arena é decisão de configuração,
   // e este bit é como o teste de warm-up prova que a configuração está certa.
   [[nodiscard]] bool overflowed() const noexcept { return overflowed_; }
+  // O endereço base. Só o stall-and-copy usa: ele copia a arena inteira de uma vez.
+  [[nodiscard]] std::byte* base() noexcept { return base_; }
+  [[nodiscard]] const std::byte* base() const noexcept { return base_; }
 
  private:
   std::byte* base_ = nullptr;

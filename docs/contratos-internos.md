@@ -812,3 +812,1115 @@ depois de um reinício.
 **Consequência assumida:** um investidor novo só passa a existir **entre dias**, quando o pacote é
 republicado. Cadastro intradiário exigiria um evento a mais (`AccountRegistered`), que é decisão de
 domínio, não de núcleo — pendência §8.
+
+### 3.4 Catálogo dos dez eventos, campo a campo
+
+Os dez nomes de `docs/arquitetura.md`, com identificador em inglês e `templateId` fixo.
+`templateId` é **imutável**: mudar o significado de um template exige template novo (§3.6, D7).
+
+| Tmpl | Nome no doc | Identificador | Bloco | Produtor | Frequência |
+|---|---|---|---|---|---|
+| 1 | `AberturaDia` | `DayOpened` | 48 | ingress | 1/dia |
+| 2 | `NegocioExecutado` | `TradeExecuted` | 88 | ingress | quente, milhões/dia |
+| 3 | `Alocado` | `TradeAllocated` | 64 | ingress | quente |
+| 4 | `LoteCompensado` | `BatchNetted` | 32 | ingress | D+1, morno |
+| 5 | `Liquidado` | `TradeSettled` | 72 | ingress | D+2, morno |
+| 6 | `EventoCorporativoAplicado` | `CorporateActionApplied` | 104 | ingress | frio, EOD |
+| 7 | `ProventoPago` | `DividendPaid` | 80 | ingress | frio |
+| 8 | `CotacaoFechada` | `ClosingPriceSet` | 64 | ingress | frio, EOD |
+| 9 | `ReconciliacaoDepositaria` | `CustodyReconciled` | 32 + grupo | ingress | frio, EOD |
+| 10 | `EodMark` | `EodMarked` | 56 | **a própria partição** (§3.3) | 1/dia |
+
+**Regras do gerador**, válidas para todas as structs (`scripts/sbe_gen.py`, ADR-0017):
+
+1. Campos ordenados por alinhamento decrescente (8, 4, 2, 1) e `_pad` explícito até múltiplo de 8;
+   little-endian; `char[]` preenchido com `'\0'`; `int64` de dinheiro, quantidade e preço são o
+   `raw()` do `Fixed` correspondente.
+2. `static_assert` de `sizeof`, `alignof`, `is_trivially_copyable_v`, `is_standard_layout_v` **e
+   `has_unique_object_representations_v`** para cada mensagem. Os quatro primeiros não proíbem
+   padding implícito; o quinto proíbe. Sem ele, o CRC sobre a struct e qualquer golden por `memcmp`
+   leriam bytes indeterminados, e o teste passaria ou falharia conforme o compilador.
+3. `_pad` é **zerado no encode**. Lixo em padding quebraria CRC e `memcmp`.
+4. Todo enum de domínio começa em 1; `0` é sempre inválido — memória zerada (buffer não
+   inicializado, extent de pré-alocação, evento truncado) é rejeitada em vez de virar "compra de
+   zero ações".
+5. Sem `varData`; só `CustodyReconciled` tem grupo repetido, com contagem máxima fixa.
+
+```cpp
+// src/codec/events.hpp   (GERADO por scripts/sbe_gen.py a partir de schema/events.xml)
+namespace rv::codec {
+
+inline constexpr uint16_t kSchemaId      = 1;
+inline constexpr uint16_t kSchemaVersion = 1;
+
+enum class Tmpl : uint16_t {
+  DayOpened = 1, TradeExecuted = 2, TradeAllocated = 3, BatchNetted = 4, TradeSettled = 5,
+  CorporateActionApplied = 6, DividendPaid = 7, ClosingPriceSet = 8, CustodyReconciled = 9,
+  EodMarked = 10,
+};
+inline constexpr uint16_t kTemplateCount = 10;
+
+enum class Side           : uint8_t { Buy = 1, Sell = 2 };
+enum class Market         : uint8_t { RoundLot = 1, Fractional = 2 };
+enum class SettleOutcome  : uint8_t { Settled = 1, DeliveryFailure = 2, BoughtIn = 3, Penalty = 4 };
+enum class ActionType     : uint8_t { Bonus = 1, Split = 2, ReverseSplit = 3, Subscription = 4,
+                                      LeftoversAuction = 5 };
+enum class IncomeKind     : uint8_t { Dividend = 1, Jcp = 2, FiiIncome = 3 };
+enum class IncomeStage    : uint8_t { Accrued = 1, Paid = 2 };
+enum class InstrumentType : uint8_t { Stock = 1, Etf = 2, Fii = 3, Bdr = 4 };
+enum class ReconResult    : uint8_t { Match = 1, Divergence = 2, MissingLocal = 3, MissingRemote = 4 };
+
+// -------- 1 --------  abre o dia, traz o calendário já resolvido e pina os dados de referência.
+struct DayOpened {
+  static constexpr uint16_t kTemplateId  = 1;
+  static constexpr uint16_t kBlockLength = 48;
+  uint64_t reference_digest;     // pacote de instrumentos + contas (§3.3); divergir é FATAL
+  uint64_t sim_seed;             // semente do simulador de carga; 0 em produção
+  uint32_t business_date;        // D
+  uint32_t prev_business_date;   // D-1 útil; continuidade conferida no apply
+  uint32_t settle_d1;            // D+1 útil, do calendário do ingress
+  uint32_t settle_d2;            // D+2 útil, ciclo padrão
+  uint32_t prune_days;           // janela de poda do log de eventos corporativos (I6): 60
+  uint16_t schema_version;
+  uint16_t partition_id;         // redundante com o segmento: detecta arquivo trocado
+  uint8_t  _pad[8];
+};
+
+// -------- 2 --------  o negócio como veio do drop copy. Custos já rateados pela corretora.
+struct TradeExecuted {
+  static constexpr uint16_t kTemplateId  = 2;
+  static constexpr uint16_t kBlockLength = 88;
+  uint64_t trade_id;             // único no dia; é a chave do livro de negócios (I5)
+  uint64_t broker_note_id;       // R13
+  uint64_t account;              // DocumentId do titular no momento da execução
+  int64_t  qty;                  // Qty raw, sempre > 0; o lado está em `side`
+  int64_t  price;                // Price raw
+  int64_t  brokerage_fee;        // Money raw
+  int64_t  exchange_fee;         // emolumentos
+  int64_t  clearing_fee;         // taxa de liquidação
+  int64_t  taxes;                // retidos na nota
+  uint32_t instrument;           // InstrumentId
+  uint32_t trade_date;           // DateYmd — D; alimenta o movimento exposto pela API
+  uint32_t settlement_date;      // DateYmd (= settle_d2 no ciclo padrão), JÁ RESOLVIDA pelo ingress
+  uint16_t flags;                // bit0 day trade; bit1 venda descoberta DECLARADA pelo participante
+  uint8_t  side;                 // Side
+  uint8_t  market;               // Market
+};
+
+// -------- 3 --------  a alocação ao investidor final; pode fatiar o negócio.
+struct TradeAllocated {
+  static constexpr uint16_t kTemplateId  = 3;
+  static constexpr uint16_t kBlockLength = 64;
+  uint64_t allocation_id;
+  uint64_t trade_id;
+  uint64_t from_account;         // DocumentId de quem executou — AUDITORIA, não roteia (§3.3)
+  uint64_t to_account;           // DocumentId do investidor final; é ele que roteia
+  int64_t  qty;                  // parcial permitida; Σ alocações == qty do negócio (QtyMismatch)
+  int64_t  cash_amount;          // parcela do financeiro, já com custos rateados
+  uint32_t instrument;
+  uint32_t settlement_date;
+  uint16_t allocation_seq;       // ordem determinística das parcelas de um mesmo trade
+  uint8_t  side;
+  uint8_t  _pad[5];
+};
+
+// -------- 4 --------  o net multilateral da câmara por (conta, data de liquidação).
+struct BatchNetted {
+  static constexpr uint16_t kTemplateId  = 4;
+  static constexpr uint16_t kBlockLength = 32;
+  uint64_t batch_id;
+  uint64_t account;              // DocumentId
+  int64_t  net_amount;           // Money raw; > 0 crédito, < 0 débito. É CONFERÊNCIA, não fonte.
+  uint32_t settlement_date;      // com `account`, é o conjunto de alocações que este lote fecha
+  uint32_t trade_count;          // quantas pernas a câmara consolidou — segunda conferência
+};
+
+// -------- 5 --------  a liquidação, a falha, a recompra e a multa.
+struct TradeSettled {
+  static constexpr uint16_t kTemplateId  = 5;
+  static constexpr uint16_t kBlockLength = 72;
+  uint64_t batch_id;
+  uint64_t account;              // DocumentId
+  uint64_t trade_id;             // 0 = todas as pernas pendentes de (conta, instrumento, data, lado)
+  int64_t  qty;                  // Qty raw
+  int64_t  cash_amount;          // Money raw com sinal (net da câmara)
+  int64_t  unit_cost;            // Price raw: custo unitário a incorporar no preço médio; 0 em venda
+  uint32_t instrument;           // kNoInstrument (0) ⇒ LINHA PURAMENTE FINANCEIRA
+  uint32_t settlement_date;      // a data do bucket que esta liquidação fecha
+  uint32_t original_settle_date; // 0 normalmente; em BoughtIn, a data VENCIDA que a recompra honra
+  uint32_t _pad0;
+  uint8_t  side;                 // Side
+  uint8_t  outcome;              // SettleOutcome
+  uint8_t  _pad1[6];
+};
+
+// -------- 6 --------  evento corporativo. Só FATOS EXTERNOS; `apply` calcula o resto (C2).
+struct CorporateActionApplied {
+  static constexpr uint16_t kTemplateId  = 6;
+  static constexpr uint16_t kBlockLength = 104;
+  uint64_t action_id;            // com `account` e o estágio, é a chave de idempotência (I6)
+  uint64_t account;              // DocumentId
+  int64_t  position_com;         // Qty raw: posição na data-com, para CONFERÊNCIA; 0 = não informada
+  int64_t  qty_delta;            // Qty raw: delta que a depositária informa, para CONFERÊNCIA; 0 = idem
+  int64_t  unit_cost;            // Price raw: custo por ação ATRIBUÍDO pela companhia (bonificação)
+  int64_t  subscription_price;   // Price raw: preço de emissão (subscrição)
+  int64_t  unit_price;           // Price raw: preço do leilão de sobras, na unidade CORRENTE
+  int64_t  qty_exercised;        // Qty raw: quantos direitos o investidor exerceu (decisão dele)
+  int64_t  withheld_tax;         // Money raw
+  uint32_t instrument;
+  uint32_t result_instrument;    // bonificação/subscrição em outro papel; senão == instrument
+  uint32_t factor_num;           // fator como par exato; ratio_from rejeita o inexato
+  uint32_t factor_den;
+  uint32_t com_date;
+  uint32_t ex_date;              // data de efeito no ledger; chave da poda de 60 dias
+  uint8_t  type;                 // ActionType
+  uint8_t  _pad[7];
+};
+
+// -------- 7 --------  provento em dinheiro, em dois estágios.
+struct DividendPaid {
+  static constexpr uint16_t kTemplateId  = 7;
+  static constexpr uint16_t kBlockLength = 80;
+  uint64_t action_id;
+  uint64_t account;              // DocumentId
+  int64_t  qty_basis;            // Qty raw: posição na data-com, declarada pelo pagador
+  int64_t  rate_per_share;       // **Price raw (1e-8)** — proventos na B3 vêm com 8 casas
+  int64_t  gross_amount;         // Money raw
+  int64_t  withheld_tax;         // Money raw (JCP: 15% na fonte)
+  int64_t  net_amount;           // Money raw
+  uint32_t instrument;
+  uint32_t com_date;             // a data a que `qty_basis` se refere
+  uint32_t ex_date;
+  uint32_t payment_date;
+  uint8_t  kind;                 // IncomeKind
+  uint8_t  stage;                // IncomeStage: Accrued → proventos_a_receber; Paid → caixa
+  uint8_t  _pad[6];
+};
+
+// -------- 8 --------  o fechamento do dia E o cadastro do instrumento.
+struct ClosingPriceSet {
+  static constexpr uint16_t kTemplateId  = 8;
+  static constexpr uint16_t kBlockLength = 64;
+  int64_t  closing_price;        // Price raw
+  int64_t  previous_close;       // Price raw
+  uint32_t instrument;           // InstrumentId do pacote de referência (§3.3)
+  uint32_t date;                 // DateYmd do fechamento
+  uint32_t price_factor;         // fator de cotação (I7); 0 ⇒ Err::InvalidInstrumentSpec
+  uint32_t lot_size;             // lote padrão; 0 ⇒ Err::InvalidInstrumentSpec
+  char     symbol[12];           // conferido contra a ligação já gravada (InstrumentIdentityMismatch)
+  char     isin[12];
+  uint8_t  type;                 // InstrumentType
+  uint8_t  status;               // 0 normal, 1 suspenso
+  uint8_t  _pad[6];
+};
+
+// -------- 9 --------  o único evento com grupo repetido. Traz ABSOLUTOS, nunca deltas.
+inline constexpr uint16_t kMaxReconRowsPerEvent = 16;
+struct CustodyReconciled {
+  static constexpr uint16_t kTemplateId  = 9;
+  static constexpr uint16_t kBlockLength = 32;
+  uint64_t file_digest;          // digest do arquivo da depositária — trilha de auditoria
+  uint32_t date;
+  uint32_t chunk_index;
+  uint32_t chunk_count;
+  uint32_t divergence_count;     // só significativo no último chunk; alimenta EodMarked.flags bit0
+  uint8_t  flags;                // bit0 = último chunk; bit1 = arquivo COMPLETO para esta partição
+  uint8_t  _pad[7];
+  // segue GroupHeader{block_length=24, num_in_group ≤ 16} e num_in_group × Reconciliation
+};
+struct Reconciliation {
+  static constexpr uint16_t kBlockLength = 24;
+  uint64_t account;              // DocumentId
+  int64_t  custodian_qty;        // Qty raw ABSOLUTO informado pela depositária
+  uint32_t instrument;
+  uint8_t  result;               // ReconResult, como o produtor o classificou
+  uint8_t  _pad[3];
+};
+
+// -------- 10 --------  a marca do fim do dia. Produzida pela PARTIÇÃO (§3.3).
+struct EodMarked {
+  static constexpr uint16_t kTemplateId  = 10;
+  static constexpr uint16_t kBlockLength = 56;
+  uint64_t state_digest;         // digest do estado IMEDIATAMENTE ANTES de aplicar este evento
+  uint64_t custody_checksum;     // Σ raw de todos os buckets de quantidade da partição
+  uint64_t cash_checksum;        // Σ raw de todos os buckets financeiros
+  uint64_t event_count;          // eventos aplicados no dia; conferido no replay
+  uint32_t date;
+  uint32_t instrument_count;
+  uint32_t account_count;
+  uint32_t divergence_count;     // do último CustodyReconciled do dia
+  uint32_t flags;                // bit0 = houve divergência de reconciliação
+  uint32_t _pad;
+};
+
+// static_asserts emitidos pelo gerador para TODAS as mensagens:
+static_assert(sizeof(TradeExecuted) == TradeExecuted::kBlockLength);
+static_assert(alignof(TradeExecuted) == 8);
+static_assert(std::is_trivially_copyable_v<TradeExecuted>);
+static_assert(std::is_standard_layout_v<TradeExecuted>);
+static_assert(std::has_unique_object_representations_v<TradeExecuted>);
+
+}  // namespace rv::codec
+```
+
+**Notas de desenho, com o porquê:**
+
+- **O evento carrega fato externo; `apply` calcula; a verificação é "verifica, não recalcula".**
+  É a regra que C2 fixou para `new_avg_price` e que este documento aplica ao catálogo inteiro. Um
+  campo cujo valor depende do estado da partição não pode viver em um evento produzido fora dela:
+  ou o produtor lê o ledger — quebrando shared-nothing (ADR-0005) — ou o campo chega com lixo. Foi
+  por isso que saíram `new_avg_price`, `cash_delta`, `leftover_delta` e `qty_delta` como fonte de
+  `CorporateActionApplied`, e o `qty_delta` de `Divergence`.
+- **`CorporateActionApplied` e o leilão de sobras.** O golden 08 exige `caixa += 0,7 × R$ 314,00
+  = R$ 219,80`. Para preencher um `cash_delta = 2198000` o produtor precisaria saber que aquela
+  conta tem 0,7 ação em `sobras` — estado da partição. Com `unit_price` (fato externo: o preço do
+  leilão), `apply` computa `notional_half_even(sobras, unit_price, 1)` e zera `sobras`. Sem esse
+  campo, `ActionType::LeftoversAuction` seria **inaplicável**: não havia preço em lugar nenhum.
+- **`qty_exercised` é campo, não cálculo.** Exercer é ato do investidor (golden 11): o motor valida
+  `0 ≤ qty_exercised ≤ direitos inteiros` — os direitos vindo de `apply_factor_floor` — e rejeita
+  fora disso com `Err::ExerciseOutOfRange`.
+- **`DividendPaid.rate_per_share` é `Price` (1e-8), não `Money`.** O golden 10 fixa
+  `valor_por_acao = 3714286` em 1e-8. Lido como 1e-4, uma posição de 100.000 ações daria bruto
+  calculado de R$ 3.710,00 contra R$ 3.714,29 declarados — R$ 4,29 contra uma tolerância de um
+  centavo, e **todo dividendo do dia** iria para a fila de exceção.
+- **`DividendPaid` tem `com_date`, e a chave de I6 inclui o estágio.** Sem `com_date` a verificação
+  3 do golden 10 ("`qty_basis` é a posição na data-com, e não a de hoje") não tem a que se referir.
+  E com a chave `(action_id, account)` o segundo estágio bateria em `AlreadyApplied`: o dinheiro
+  nunca sairia de `proventos_a_receber` para `caixa`, e o ledger financeiro ficaria permanentemente
+  errado **enquanto internamente consistente** — que é o pior modo de falha descrito pelo golden 09.
+  A chave é `(action_id, account, stage)`, e isso está em §6.1, não só aqui.
+- **`TradeSettled` alcança duas datas e dois lados.** O golden 06, passo 7, é *um* `Liquidado{0915}`
+  que faz `a_liq_venda[0910] −= 50` **e** `a_liq_compra[0915] −= 50`. Com uma só `settlement_date`,
+  a obrigação vencida de 0910 ficaria pendurada para sempre e I1 acusaria 137 contra uma
+  depositária com 87 — uma divergência fantasma de 50 ações naquela conta, **todo EOD, para
+  sempre**, que é exatamente o "alarme virando ruído" que o golden 06 quer evitar.
+  `original_settle_date` com `outcome = BoughtIn` significa "credita a entrega e fecha o bucket
+  vencido daquela data".
+- **`instrument == kNoInstrument` ⇒ linha puramente financeira.** É o que permite o day trade do
+  golden 05 ser 2 linhas de quantidade + 1 linha de caixa com o net da câmara, sem duplicar
+  `caixa += a_liquidar[D]`. E `SettleOutcome::Penalty` dá casa à multa de falha do golden 06, que é
+  linha financeira sem quantidade — o golden manda "registrar como movimento" e não dizia onde.
+- **`BatchNetted` fecha o conjunto `(account, settlement_date)`.** É o que `Err::UnknownBatch`
+  pressupõe, e nenhum evento construía esse mapa. `net_amount` é **conferência em produção**:
+  `apply` compara com o que ele mesmo acumulou em `a_liquidar[conta][D]` e, na divergência,
+  devolve `Err::NettingMismatch` e enfileira na fila de exceção — **não grava o número da câmara**.
+  É literalmente o que o golden 05 exige ("ele não recalcula o número — ele confirma... divergência
+  vai para a fila de exceção, não para o ledger"), e transforma I2 em uma checagem viva e barata
+  (uma comparação por lote) em vez de um assert só de debug.
+- **`ClosingPriceSet` é cadastro e cotação ao mesmo tempo.** O arquivo de fechamento da B3 traz
+  ticker, ISIN, tipo, fator de cotação e preço. Um evento por instrumento por dia dá ao replay tudo
+  para reconstruir a tabela sem ler arquivo externo (I12), e é o ponto onde a ligação
+  `InstrumentId → símbolo` é conferida. `price_factor == 0` é **rejeitado aqui**
+  (`Err::InvalidInstrumentSpec`, golden 12): sem esse código, o zero chegaria a
+  `notional_half_even`, cujo `mul_div` exige `d > 0` — divisão por zero em `expose/`, fora do
+  núcleo e fora do fail-stop.
+- **Reconciliação traz absolutos e é fatiada.** `custodian_qty` é o número da depositária; `apply`
+  calcula I1 do próprio estado, deriva a diferença e grava **os dois números** na fila de exceção
+  — que é o que o golden 14 pede como teste. Um `qty_delta = depositária − motor` exigiria que
+  `ingress/b3_files.cpp` reconstruísse o ledger da partição, e um delta congelado no log
+  reproduziria no replay uma divergência que já não existe.
+  `kMaxReconRowsPerEvent = 16` mantém o evento em 32 + 4 + 16×24 = **420 bytes**, dentro do slot de
+  512 do ring de ingresso: existe **um** caminho de entrada de evento, não dois.
+- **O caso mudo da reconciliação.** Uma posição que o motor tem e a depositária não reporta não
+  gera linha nenhuma no arquivo, logo I1 nunca seria confrontada para ela e o motor carregaria 100
+  ações fantasmas indefinidamente com a reconciliação dizendo que está tudo certo. Por isso
+  `flags` bit1 declara "arquivo completo para esta partição": ao aplicar o último chunk com esse
+  bit, `apply` varre as posições e marca `MissingRemote` toda posição com I1 ≠ 0 cujo
+  `last_recon_date` não é o do dia. É uma varredura por dia, e é a única forma de o silêncio virar
+  evidência.
+- **`EodMarked` carrega um digest posicional, não só somatórios.** Os dois checksums são somas, e
+  **soma cancela**: uma transferência errada entre `disponivel` e `a_liquidar_venda` da mesma conta,
+  ou entre duas contas da mesma partição, passa pelos dois. O `state_digest` (§3.5) é sensível à
+  posição (conta × instrumento × bucket), e o replay o recomputa **antes** de aplicar o evento e
+  compara: um replay que divergiu falha **no evento exato**, não "em algum lugar do dia". Os dois
+  somatórios ficam porque são baratos e servem de âncora legível em ferramenta.
+
+Runtime do codec (escrito à mão, não gerado):
+
+```cpp
+// src/codec/sbe_runtime.hpp
+namespace rv::codec {
+
+struct MessageHeader { uint16_t block_length; uint16_t template_id; uint16_t schema_id; uint16_t version; };
+static_assert(sizeof(MessageHeader) == 8);
+struct GroupHeader   { uint16_t block_length; uint16_t num_in_group; };
+static_assert(sizeof(GroupHeader) == 4);
+
+template <class T>
+[[nodiscard]] Result<const T*> view_as(ByteSpan b) noexcept;   // checa len ≥ kBlockLength e alinhamento 8
+
+[[nodiscard]] Result<const TradeExecuted*> decode_trade_executed(ByteSpan) noexcept;
+[[nodiscard]] Result<uint16_t>             encode(MutBytes, const TradeExecuted&) noexcept;
+}
+```
+
+### 3.5 O ledger e o `PartitionState`
+
+Esta é a parada nº 6 da ordem de leitura e o arquivo-barreira B3 da Onda 0. Sem ele, o agente de
+`core/` e o de `wal/` inventam layouts incompatíveis — que é exatamente o que a Onda 0 existe para
+impedir. Tudo aqui é `core/state.hpp` e `core/state_layout.hpp`.
+
+#### O anel de datas abertas — a decisão de layout mais importante do ledger
+
+```cpp
+// src/core/state.hpp
+namespace rv::core {
+
+// Oito, não três. D+2 mantém ~3 datas abertas; 8 cobre feriado longo, falha de entrega
+// arrastada (golden 06) e reentrega, com folga de 2,6×.
+inline constexpr uint32_t kSettleSlots = 8;
+
+// O anel é da PARTIÇÃO, não da posição: as datas de liquidação abertas são as MESMAS para todas
+// as contas. Assim a posição guarda só oito valores — exatamente uma linha de cache.
+struct SettlementRing {
+  DateYmd  date[kSettleSlots]{};      // 0 = slot livre
+  uint8_t  overdue[kSettleSlots]{};   // 1 = a data já venceu e o bucket não zerou (C3)
+  [[nodiscard]] int find(DateYmd) const noexcept;             // −1 se ausente
+  [[nodiscard]] int find_or_open(DateYmd) noexcept;           // −1 se cheio → Err::SettlementWindowFull
+  [[nodiscard]] Status roll(DateYmd business_date) noexcept;  // chamado por apply_day_opened
+};
+
+struct alignas(64) SettleRow  { Qty   v[kSettleSlots]; };   // 8 × int64 = 64 B = uma linha de cache
+struct alignas(64) CashRow    { Money v[kSettleSlots]; };
+static_assert(sizeof(SettleRow) == 64 && sizeof(CashRow) == 64);
+static_assert(std::has_unique_object_representations_v<SettleRow>);
+}
+```
+
+**Por que a data mora no slot, e por que o anel é da partição.** Três alternativas estavam na mesa:
+
+| Alternativa | Por que não |
+|---|---|
+| `day_index() % 3` (ou `% 4`, `% 8`) | Colide no ciclo normal: as datas abertas distam 3, 4 ou 5 dias de **calendário** (§3.3). Nenhuma potência de dois salva um índice de calendário. |
+| Índice de **dia útil** com anel de 8 | Correto, e é uma boa alternativa. Mas exige uma `BusinessCalendar` carregada no núcleo, com digest conferido — isto é, um calendário dentro de `core`, que é justamente o que o golden 06 e `data/README.md` mandam manter fora. |
+| **Data no slot, anel da partição** ← adotada | Não precisa de calendário nenhum: `find_or_open` é uma varredura linear de oito `uint32` que estão sempre em L1, compartilhados por toda a partição. O slot é auto-descritivo, então o snapshot sabe a que data cada valor se refere sem consultar estado externo. E o **bucket vencido de C3 é apenas uma data aberta que parou de andar** — o `roll` do `DayOpened` marca `overdue[i] = 1` para toda data anterior a `business_date` cujo bucket não zerou, e ela continua contando em I1 e I13 exatamente como as outras. |
+
+O `roll` só libera um slot quando ele está zerado nas três colunas que o usam
+(`RV_INVARIANT(I2, bucket_is_zero(slot))`); um slot vencido e não-zero permanece com sua data. Um
+anel cheio devolve `Err::SettlementWindowFull` — **rejeição, não fail-stop**: rejeitar deixa o
+estado intacto e a divergência aparece na reconciliação do dia, enquanto derrubar a partição
+transformaria um problema de uma conta em indisponibilidade de todo mundo (golden 04).
+
+#### Custódia e financeiro em SoA
+
+```cpp
+// src/core/custody_ledger.hpp — as ÚNICAS funções que alteram bucket de quantidade (I3)
+namespace rv::core {
+
+struct CustodyColumns {                 // uma entrada por PositionSlot
+  Qty*        available;                // livre para negociar
+  Qty*        blocked;                  // garantia, empréstimo — ver a nota "bloqueado na v1"
+  Qty*        leftovers;                // `sobras`, SEMPRE na unidade corrente do instrumento (C6)
+  Price*      avg_price;                // muda só em Liquidado(compra) e evento corporativo (I4)
+  SettleRow*  pending_buy;              // a_liquidar_compra, por slot do anel
+  SettleRow*  pending_sell;             // a_liquidar_venda,  por slot do anel
+  uint32_t*   account;                  // AccountId dono da linha
+  uint32_t*   instrument;               // InstrumentId da linha
+  uint32_t*   last_recon_date;          // DateYmd da última reconciliação que cobriu esta linha
+  uint8_t*    flags;                    // bit0 = venda a descoberto autorizada (do cadastro)
+  uint32_t    count, capacity;
+  static constexpr uint8_t kShortAllowed = 1u << 0;
+};
+
+// Únicos mutadores. Devolvem Err::NegativeBucket (rejeitado) quando o resultado ficaria < 0,
+// exceto `available` quando `flags & kShortAllowed` (I3, golden 04 caso B).
+[[nodiscard]] Status add_qty(CustodyColumns&, PositionSlot, Qty* column, Qty delta) noexcept;
+[[nodiscard]] Status add_pending(CustodyColumns&, PositionSlot, SettleRow* col, SettleSlot, Qty) noexcept;
+
+// I1 e I13, como funções nomeadas: são identidades DIFERENTES sobre os mesmos buckets.
+[[nodiscard]] Qty custody_today(const CustodyColumns&, const SettlementRing&, PositionSlot) noexcept;
+[[nodiscard]] Qty custody_projected(const CustodyColumns&, const SettlementRing&, PositionSlot) noexcept;
+}
+
+// src/core/cash_ledger.hpp — o ledger financeiro de docs/dominio.md, por conta
+namespace rv::core {
+struct CashColumns {                    // uma entrada por AccountId
+  Money*    cash;                       // `caixa`
+  Money*    income_receivable;          // `proventos_a_receber`
+  CashRow*  pending;                    // `a_liquidar[D]`, no MESMO anel de datas da custódia
+  uint32_t  count, capacity;
+};
+}
+```
+
+`custody_today` é `available + Σ pending_sell[slots] + blocked + leftovers` — **I1**, o que a
+depositária guarda hoje. `custody_projected` é `available + Σ pending_buy[slots] + blocked +
+leftovers` — **I13**, a posição depois que tudo pendente liquidar. As duas existem como funções
+nomeadas porque a diferença entre elas é a origem do defeito que a correção C1 desfez: um motor que
+verificasse só uma passaria a semana inteira certo e erraria exatamente nos dois dias em que
+houvesse liquidação pendente de um lado só (golden 03).
+
+**O anel financeiro é o MESMO da custódia.** `CashRow` usa os mesmos slots de `SettlementRing`, e a
+resposta à pergunta "o `a_liquidar` financeiro compartilha o anel de datas com o de custódia?" é
+sim, por construção. Um segundo anel exigiria duas rolagens, duas regras de vencimento e duas
+formas de I2 discordarem.
+
+**`bloqueado` na v1.** ADR-0010 exclui derivativos e BTC do escopo v1, e nenhum dos dez templates
+escreve `blocked`. A coluna **fica**, porque `docs/invariantes.md` (I1 e I13, com a correção C1) a
+soma explicitamente e um enunciado de invariante não se reescreve num documento de costura. A
+consequência é assumida e **verificada**: `tests/domain/test_v1_blocked_always_zero.cpp` afirma que
+a coluna é toda zero ao fim de cada cenário golden, e falha no dia em que alguém escrever nela sem
+o template correspondente. Deixar a coluna declarada, não-escrevível e **não-verificada** seria a
+pior das três opções: o assert de I1 passaria e a API responderia `blockedAmount: 0` para quem tem
+ações em garantia. O template de bloqueio/desbloqueio, com o golden que o exercita, é pendência §8.
+
+#### Livro de negócios, log de eventos corporativos e fila de exceção
+
+```cpp
+// src/core/trade_book.hpp — sem isto, I5 não sobrevive a um reinício
+namespace rv::core {
+enum class TradeState : uint8_t { None = 0, Executed = 1, Allocated = 2, Netted = 3,
+                                  Settled = 4, DeliveryFailure = 5 };
+struct TradeRecord {
+  uint64_t trade_id;  Qty qty;  uint32_t account; uint32_t instrument;
+  uint32_t settlement_date; TradeState state; uint8_t side; uint8_t _pad[2];
+};
+static_assert(sizeof(TradeRecord) == 40 && std::has_unique_object_representations_v<TradeRecord>);
+class TradeBook { /* índice denso trade_id → TradeRecord, arena própria, poda por DayOpened */ };
+}
+
+// src/core/corporate_action_log.hpp — a idempotência de I6
+namespace rv::core {
+struct ActionKey { uint64_t action_id; uint32_t account; uint8_t stage; uint8_t _pad[3]; };
+struct ActionValue { uint32_t ex_date; uint8_t outcome; uint8_t _pad[3]; };  // Applied | RejectedMismatch
+class CorporateActionLog {
+ public:
+  [[nodiscard]] const ActionValue* find(const ActionKey&) const noexcept;   // chave INTEIRA comparada
+  [[nodiscard]] Status mark(const ActionKey&, ActionValue) noexcept;
+  void prune_before(DateYmd ex_date_floor) noexcept;                        // chamado por DayOpened
+};
+}
+
+// src/core/exception_queue.hpp — é ESTADO (goldens 04, 05, 10, 14), não métrica
+namespace rv::core {
+struct ExceptionRecord {
+  Lsn      lsn;              // o evento que gerou a exceção
+  uint64_t account;          // DocumentId
+  int64_t  observed_raw;     // o número do motor
+  int64_t  expected_raw;     // o número do terceiro (depositária, câmara, pagador)
+  uint32_t instrument;
+  uint32_t date;
+  Err      reason;
+  uint16_t _pad;
+};
+static_assert(sizeof(ExceptionRecord) == 48 && std::has_unique_object_representations_v<ExceptionRecord>);
+class ExceptionQueue { /* arena própria; drenada pelo loop; copiada no stall-and-copy */ };
+}
+```
+
+**Por que a chave de I6 não pode ser um `DenseIndex` de `uint64`.** A chave é
+`(action_id: uint64, account: uint32, stage: uint8)` — mais de 64 bits. Ou o par é hasheado para 64
+bits e a comparação vira probabilística, ou a estrutura não serve. Colisão significaria engolir
+silenciosamente um evento corporativo distinto como duplicata, e `AlreadyApplied` é uma rejeição que
+só incrementa métrica: a linha do golden 13 "903 e 904 na mesma conta, mesma data-ex → as duas
+aplicam" viraria cara-ou-coroa em escala. Por isso `CorporateActionLog` guarda a **chave inteira**
+e a compara por inteiro. O valor guarda `ex_date` porque a poda de 60 dias do golden 13 precisa
+dela — sem isso o conjunto cresceria em arena selada até `ArenaExhausted`, que é **fatal**: a
+partição morreria depois de N dias de produção e nunca em teste, porque nenhum teste roda 60 dias.
+
+**Regra de marcação na rejeição, escrita para não ficar em aberto.** `AlreadyApplied` **não** marca
+(já está marcado). `QtyMismatch` (a conferência de C2 falhando) **marca** com
+`outcome = RejectedMismatch` e enfileira na fila de exceção — assim a reentrega corrigida do mesmo
+`action_id` é reconhecível. Toda outra rejeição **não** marca. Sem essa regra escrita, duas
+implementações conformes ao documento produziriam dois estados a partir do mesmo prefixo de log.
+
+**Por que a fila de exceção é estado da partição e não campo de `ApplyContext`.** Golden 13 dá a
+regra geral: "se uma estrutura muda a decisão do `apply`, ela é estado e vai para o snapshot"; e o
+golden 14 exige, como teste, que "recuperar do snapshot reproduz a fila de exceção idêntica (I11)".
+Uma fila em `ApplyContext` estaria fora da imagem de recuperação e voltaria vazia depois de um
+reinício — violando I11 do jeito silencioso que o golden 04 descreve ("o estado principal bateria e
+o auxiliar não"). Por isso `ApplyContext` continua sendo `{Outbox&, Metrics&}` e a fila mora em
+`PartitionState`.
+
+#### `PartitionState`
+
+```cpp
+// src/core/state.hpp
+namespace rv::core {
+
+class PartitionState {
+ public:
+  [[nodiscard]] Status init(Arena&, const StateCapacities&) noexcept;   // warm-up; depois Arena::seal()
+
+  // --- ledgers ---
+  CustodyColumns      custody;
+  CashColumns         cash;
+  SettlementRing      settle;                 // as datas abertas, comuns a toda a partição
+
+  // --- índices e tabelas de instrumento (SoA, indexadas por InstrumentId) ---
+  DenseIndex          position_index;         // (AccountId, InstrumentId) → PositionSlot, chave inteira
+  DenseIndex          account_index;          // DocumentId → AccountId
+  InstrumentColumns   instruments;            // símbolo, isin, tipo, price_factor, lot_size, close, prev_close
+
+  // --- estruturas que MUDAM A DECISÃO do apply: são estado, vão para o snapshot ---
+  TradeBook           trades;
+  CorporateActionLog  applied_actions;
+  ExceptionQueue      exceptions;
+
+  // --- posição de leitura e ciclo ---
+  Lsn                 applied_lsn{};          // último LSN aplicado
+  Lsn                 frozen_at{};            // != 0 ⇒ o dia está selado em `frozen_at` (§3.9)
+  uint64_t            outbox_seq{};           // próximo `seq` de saída; entra na imagem (§3.8)
+  DateYmd             business_date{};        // do último DayOpened aplicado
+  DateYmd             prev_business_date{};
+  uint64_t            reference_digest{};     // pinado pelo DayOpened do dia
+  uint64_t            event_count_today{};
+
+  // --- verificação ---
+  void debug_check_position(PositionSlot) const noexcept;   // I1, I3, I4, I13 — só em debug
+  void debug_check_account(AccountId)     const noexcept;   // I2
+  [[nodiscard]] uint64_t state_digest()   const noexcept;   // §3.9, gravado em EodMarked
+};
+}
+```
+
+`state_layout.hpp` ancora, ao lado, os `static_assert` de tamanho, alinhamento e
+`has_unique_object_representations_v` de **cada** coluna e de cada struct acima — é onde
+`CODING_RULES §8` aterrissa para o estado, e é o que faz o `state_digest` ser reprodutível entre
+compiladores.
+
+**Regra de aceitação, para a §7 não mentir:** nenhum PR que introduza estrutura consultada por
+`apply` passa sem (a) a seção correspondente em `wal/state_format.hpp`, (b) uma linha no teste de
+round-trip do snapshot, e (c) a contribuição dela para `state_digest()`. É a forma executável da
+regra do golden 13.
+
+### 3.6 `apply()` — a fronteira do núcleo
+
+```cpp
+// src/core/apply.hpp
+namespace rv::core {
+
+// 32 bytes, trivialmente copiável: cabe em dois registradores por par.
+struct EventView {
+  Lsn              lsn;
+  uint64_t         ts_ns;      // AUDITORIA. apply pode copiar; não pode comparar nem calcular.
+  const std::byte* payload;    // buffer de commit do WAL; válido até o próximo maybe_submit
+  uint16_t         tmpl;       // == codec::Tmpl
+  uint16_t         len;
+  uint32_t         _pad;
+};
+static_assert(sizeof(EventView) == 32 && std::is_trivially_copyable_v<EventView>);
+
+// Tudo que apply pode tocar ALÉM do estado. Se não está aqui, apply não alcança.
+// A fila de exceção NÃO está aqui: ela é estado (§3.5), porque tem de sobreviver ao snapshot.
+struct ApplyContext {
+  Outbox&  outbox;
+  Metrics& metrics;
+};
+
+enum class ApplyClass : uint8_t { Accepted, Rejected, Fatal };
+[[nodiscard]] constexpr ApplyClass classify(Status) noexcept;   // faixa 200..249 vs 250..299
+
+[[nodiscard]] Status apply(PartitionState& state, const EventView& ev, ApplyContext& ctx) noexcept;
+
+}  // namespace rv::core
+```
+
+**Contrato de determinismo (D1..D8).** É o texto que o `verificador` usa para reprovar um PR.
+
+| # | Regra | Como é conferida |
+|---|---|---|
+| D1 | `apply` é função pura de `(state, ev)`: mesmo par ⇒ mesmo estado final, mesmo `Status`, mesmas entradas de outbox, na mesma ordem. | `tests/core/test_i11_replay_equivalence.cpp` + `state_digest` |
+| D2 | Sem relógio, sem RNG, sem I/O. `ev.ts_ns` só pode ser **copiado** para saída — nunca comparado, subtraído ou usado em condição. | lista branca de `nm -u` + varredura de opcode (`rdtsc`, `rdrand`) + clang-tidy `rv-ts-no-compare` + `app/replay_main.cpp` linkado com `--wrap` |
+| D3 | Sem alocação: tudo vem das arenas de `state`, já `seal()`ed. Faltar espaço é `ArenaExhausted`, fatal. | `Arena::seal()` + ASan |
+| D4 | Sem dependência de endereço. A **ordem de iteração de todo índice denso é a ordem de slot**, nunca a ordem de inserção em bucket — que depende de colisões e portanto do tamanho da tabela. | `base/dense_index.hpp` só expõe iteração por slot; clang-tidy proíbe comparar ponteiros |
+| D5 | Sem `double`/`float` em `rv_core` e `rv_codec`. | clang-tidy (`rv-no-floating-point`) + `-Werror=float-conversion` |
+| D6 | Sem exceções (alvos com `-fno-exceptions`). | flag do alvo |
+| D7 | **Mudar o significado de um `templateId` existente é proibido.** Comportamento novo = template novo. | `tests/wal/test_format_backcompat.cpp` lê um log da versão anterior, versionado no repositório |
+| D8 | **`apply` que devolve `Rejected` não modifica `state`.** Todo handler é `check_*` (valida tudo, não toca em nada) seguido de `commit_*` (muta, não pode falhar). | comparação de `state_digest()` antes/depois em todo caso rejeitado do teste de propriedade de I5 |
+
+**Por que D8 precisa estar escrito.** O golden 06 torna normativo que uma transição fora do grafo
+devolve rejeição "**e estado byte a byte idêntico**", e o golden 04 diz o mesmo para a venda a
+descoberto sem flag. D1 fala de determinismo, não de atomicidade: nada impediria um handler de
+debitar `disponivel` e só então descobrir que devia rejeitar. O teste de propriedade de I5 percorre
+6 estados × 10 tipos de evento = 60 combinações, das quais 7 estão no grafo, e compara o digest nas
+53 restantes — sem D8, o autor do handler não teria violado nenhuma frase do contrato, e um
+requisito normativo viraria discussão de revisão. A disciplina de duas fases também é o que mantém
+`apply` all-or-nothing **sem rollback**, que é o motivo do pré-voo do outbox em §3.8.
+
+**O que pode falhar, e o que acontece.** Duas classes, só duas:
+
+| `Err` | Classe | O que o runner faz |
+|---|---|---|
+| Faixa 200..249: `InvalidTransition`, `AlreadyApplied`, `NegativeBucket`, `QtyMismatch`, `UnknownBatch`, `NettingMismatch`, `InvalidInstrumentSpec`, `SettlementWindowFull`, `ShortSellNotAuthorized`, `IncomeOutOfTolerance`, `InvalidFactor`, `ExerciseOutOfRange` | `Rejected` | Incrementa métrica, **consome o evento** e segue. O evento fica no log; a exceção vai para `state.exceptions` quando o cenário golden pede (04, 05, 10, 14). |
+| Faixa 250..299 + `UnknownTemplate`, `ShortPayload`, `BadBlockLength`, `ArenaExhausted` | `Fatal` | `RV_FAIL_STOP`: a partição para de consumir, o outbox congela, a métrica sobe e o processo registra o LSN. `applied_lsn` fica em k−1. |
+
+**A ideia que sustenta tudo isso:** o log é a verdade do que **chegou**, não do que foi aceito.
+`append` acontece antes de `apply`, então eventos rejeitados estão no log — e o replay os rejeita
+de novo, pelo mesmo código, com o mesmo `Status`. Não existe "caminho de validação" separado do
+caminho de aplicação; existiriam duas verdades. É também o que permite `append` vir antes de
+`apply` no loop (§3.9), que é o estado otimista de `docs/wal.md`.
+
+**`Fatal` durante o replay, que o desenho anterior deixava indefinido.** Recuperação usa **o mesmo
+runner** que produção: um `Fatal` durante o replay **para o replay no mesmo LSN** e deixa a partição
+haltada, exatamente como ao vivo. Sem essa regra, o caso em que I11 mais importa seria o único em
+que ela é indefinida: um `TradeExecuted` citando um instrumento nunca descrito devolve
+`UnknownInstrument`, que é fatal; ao vivo a partição halta em k com estado S(k−1); no replay o
+registro tem magic, CRC e LSN corretos, então o laço o valida, chama `apply` e recebe `Fatal`. Se o
+replay continuasse, o estado final seria S(N) ≠ S(k−1) e o operador que reinicia depois de um
+fail-stop voltaria com um estado que nunca existiu. `RecoveryReport` ganha `fatal_lsn` e
+`fatal_err` para que o "onde" seja reportável (§3.7).
+
+**Idempotência e verificação — o padrão "verifica, não recalcula", em uma tabela:**
+
+| Handler | Fato externo que ele recebe | O que ele calcula | O que ele confere |
+|---|---|---|---|
+| `apply_batch_netted` | `net_amount`, `trade_count` | nada | `Σ a_liquidar[conta][D]` acumulado × `net_amount` → `NettingMismatch` (golden 05) |
+| `apply_corporate_action` | `factor_num/den`, `unit_cost`, `subscription_price`, `unit_price`, `qty_exercised` | nova `disponivel`, nova `sobras`, novo `avg_price`, `caixa` | `position_com` e `qty_delta`, quando ≠ 0 → `QtyMismatch` (C2) |
+| `apply_dividend_paid` | `gross_amount`, `withheld_tax`, `net_amount`, `rate_per_share`, `qty_basis` | `proventos_a_receber` (Accrued) ou `caixa` (Paid) | `bruto − irrf == liquido`; `\|bruto − qty_basis × rate\| ≤ 1 centavo` → `IncomeOutOfTolerance` (golden 10) |
+| `apply_custody_reconciled` | `custodian_qty` absoluto | I1 do próprio estado e a diferença | grava **os dois números** na fila de exceção; liga `flags` bit0 só quando ≠ 0 (golden 14) |
+| `apply_trade_executed` | `flags` bit1 (declaração do participante) | buckets e financeiro | bit1 × `custody.flags & kShortAllowed` do cadastro → `ShortSellNotAuthorized` |
+
+**Por que `apply` nunca recalcula um número decidido por terceiro.** O golden 10 diz por quê em uma
+frase que vale para o catálogo inteiro: o valor creditado é decisão do emissor e da depositária, com
+regra de arredondamento própria que muda por deliberação; se o motor recalculasse, ele e o extrato
+do investidor discordariam em centavos — todo mês, em milhões de contas — e a diferença apareceria
+como divergência de reconciliação sem que ninguém tivesse errado. Verificar dentro de uma tolerância
+declarada acha o erro de verdade e ignora o ruído que não é erro.
+
+**Por que I3 lê a flag do ledger, e não do evento.** O golden 04 caso B é explícito: "o mesmo evento
+com `short_allowed = true` **no cadastro da conta × instrumento**". `debug_check_position()` roda ao
+fim de cada `apply` e **não tem o evento em mãos**; com a flag só no evento, esse assert não
+distinguiria um descoberto autorizado de um ledger corrompido, e o estado final legítimo do golden
+04B (`disponivel = −63`) faria o próximo evento qualquer — um desdobramento, uma reconciliação, o
+`EodMarked` — derrubar a partição inteira. A flag é atributo da linha `(conta, instrumento)`, vem do
+pacote de referência (§3.3) e está na imagem de recuperação; o bit1 de `TradeExecuted` fica como
+declaração do participante, **conferida** contra o cadastro.
+
+**I4 por construção, não por `grep`.** `core/average_price.hpp` define um tipo-tag
+`AvgPriceAuthority` cujo construtor é privado e cujos únicos `friend` são
+`settlement.cpp::settle_buy` e `corporate_action.cpp`. `set_avg_price(...)` exige o tag, então uma
+terceira função que escreva `avg_price` **não compila**.
+`tests/core/test_i4_static_authority.cpp` é um teste de compilação negativa. O desenho anterior
+defendia I4 com um script procurando "uma terceira função" — um `grep`, que qualquer indireção
+derrota; o passkey não é derrotável.
+
+### 3.7 O log visto pelo núcleo, o backend plugável e a recuperação
+
+```cpp
+// src/core/journal.hpp   — o núcleo declara o que precisa; quem fornece é problema do app.
+namespace rv::core {
+
+struct Appended {
+  Lsn                        lsn;
+  std::span<const std::byte> payload;   // a cópia única, já no buffer de commit; apply lê daqui
+};
+
+template <class J>
+concept Journal = requires(J j, uint16_t tmpl, ByteSpan payload, uint64_t ts_ns, uint64_t now_ns,
+                           const PartitionState& st, Lsn at, uint64_t deadline_ns) {
+  // --- caminho quente ---
+  { j.append(tmpl, payload, ts_ns) } noexcept -> std::same_as<Result<Appended>>;
+  { j.maybe_submit(now_ns) }        noexcept -> std::same_as<Status>;
+  { j.reap() }                      noexcept -> std::same_as<Status>;
+  { j.durable_lsn() }               noexcept -> std::same_as<Lsn>;
+  { j.last_lsn() }                  noexcept -> std::same_as<Lsn>;
+  { j.halted() }                    noexcept -> std::same_as<bool>;
+  // --- fora do caminho quente: o ciclo de EOD faz parte do contrato, não do aplicativo ---
+  { j.force_commit(now_ns) }              noexcept -> std::same_as<Status>;
+  { j.await_durable(at, deadline_ns) }    noexcept -> std::same_as<Status>;
+  { j.snapshot(st, at) }                  noexcept -> std::same_as<Status>;
+};
+}
+```
+
+| Método | Promessa |
+|---|---|
+| `append` | Copia o payload **uma vez** para o buffer de commit, escreve `WalHdr`, devolve o LSN e o ponteiro para a cópia. Falha com `WalFull` — transitória, **sem efeito**: tente na próxima volta. |
+| `maybe_submit(now_ns)` | Se a janela `W` venceu ou o grupo chegou a `kMaxGroup`, faz padding, submete e enfileira em `inflight_`. É o **único** ponto do núcleo que recebe o relógio. |
+| `reap()` | Drena completions; avança `durable_lsn` em ordem FIFO (I9); `res` diferente do esperado é fail-stop. |
+| `durable_lsn()` | Maior LSN cujo grupo, **e todos os anteriores**, completaram. Monótono, nunca maior que `last_lsn()` (I9). É um `uint64` simples lido pela própria thread — **não** é `atomic`: a thread de snapshot só o lê no ponto de stall, quando a partição está parada (`CODING_RULES §5` limita atomics aos cursores dos rings). |
+| `force_commit(now_ns)` | Fecha o grupo corrente agora. Usado pelo EOD. |
+| `await_durable(at, deadline_ns)` | Bloqueia (via `wait` do backend) até `durable_lsn ≥ at`; ao vencer o prazo devolve `IoError` e faz fail-stop. |
+| `snapshot(state, at)` | Stall-and-copy exatamente em `at` (ADR-0014). Está **no concept** para que quem escreve o duplo de teste não possa esquecer que o EOD existe. |
+| `halted()` | Uma vez `true`, para sempre. |
+
+**Por que `concept` e não classe base.** `append` é chamado uma vez por evento — milhões por
+segundo. Um `concept` custa zero e ainda produz o duplo de teste mais simples possível:
+`core::testing::MemoryJournal`, que satisfaz `Journal` sem tocar em disco e permite escolher
+exatamente quando `durable_lsn` avança. Com `snapshot` e `await_durable` dentro do concept, o duplo
+também exercita a sequência de EOD — que é justamente onde mora a classe de defeito mais cara deste
+sistema (snapshot fora de `eod_lsn`).
+
+```cpp
+// src/wal/io_backend.hpp — ADR-0023: resolvido em COMPILAÇÃO, não por virtual.
+namespace rv::wal {
+
+struct WriteRequest {
+  uint32_t seg_index;      // índice do fd registrado
+  const void* buf;
+  uint32_t len;            // múltiplo do bloco
+  uint64_t offset;         // múltiplo do bloco
+  uint16_t buf_index;      // índice do buffer registrado
+  uint64_t token;          // == last_lsn do grupo
+};
+struct Completion { uint64_t token; int32_t res; };
+
+template <class B>
+concept IoBackend = requires(B b, std::span<const int> fds, std::span<const iovec> bufs,
+                             const WriteRequest& r, std::span<Completion> out, uint64_t timeout_ns) {
+  { b.register_files(fds) }            noexcept -> std::same_as<Status>;
+  { b.register_buffers(bufs) }         noexcept -> std::same_as<Status>;
+  { b.submit(r) }                      noexcept -> std::same_as<Status>;
+  { b.poll(out) }                      noexcept -> std::same_as<uint32_t>;   // não bloqueia
+  { b.wait(timeout_ns, out) }          noexcept -> std::same_as<uint32_t>;   // bloqueia com prazo
+  { b.inflight() }                     noexcept -> std::same_as<uint32_t>;
+};
+
+class UringBackend  { /* SINGLE_ISSUER|DEFER_TASKRUN, WRITE_FIXED, fds e buffers registrados */ };
+class PwriteBackend { /* pwrite() em fd O_DIRECT|O_DSYNC; completa dentro de submit()          */ };
+class MemBackend    { /* o "segmento" é um std::span<std::byte>: sem disco, sem root           */ };
+
+// Decorator sobre QUALQUER backend, com roteiro declarativo — nada de RNG.
+template <IoBackend B>
+class FaultBackend {
+ public:
+  enum class Fault : uint8_t { None, ShortWrite, IoError, Hang };
+  struct Step { uint32_t at_submit; Fault fault; int32_t res; uint32_t delay_polls; };
+  struct FaultPlan { std::span<const Step> steps; std::span<const uint32_t> completion_order; };
+  FaultBackend(B& inner, const FaultPlan&) noexcept;
+};
+}
+```
+
+**Decisão — volta ao que ADR-0023 fixou.** O desenho anterior adotava `class IoBackend` com
+virtuais puras e `make_*_backend` devolvendo `unique_ptr`, com um parágrafo dizendo que a assimetria
+"é a regra do projeto". ADR-0023 decidiu o oposto, **com estas palavras**: backend "resolvido em
+tempo de compilação (parâmetro de template, não função virtual)", e registrou a interface virtual
+como **alternativa rejeitada**, porque ela "coloca uma chamada indireta no caminho de commit e
+impede o compilador de embutir o `reap`". A justificativa do desenho anterior — "`submit`/`reap`
+acontecem uma vez por grupo" — é falsa dentro do próprio documento: `Partition::poll` chama
+`reap()` **incondicionalmente a cada volta**, e o loop é busy-poll por padrão; com o mercado parado,
+`reap()` roda milhões de vezes por segundo. Além disso `unique_ptr<IoBackend>` põe `new` e destrutor
+virtual dentro de `rv_wal`, num projeto onde `app/` é o único lugar com `new`. A vantagem que o
+desenho queria comprar — "a escolha `io_uring | pwrite` vira uma linha de configuração" — continua
+existindo: muda de arquivo de configuração para alias de tipo (`using Wal = WalT<UringBackend>`),
+com instanciação explícita em `app/instantiate.cpp`, e a suíte de WAL continua rodando sem io_uring.
+CLAUDE.md é claro: ADR é decisão fechada, e mudá-la exige ADR novo com números — não um parágrafo
+em um documento de costura.
+
+**Por que `wait(timeout_ns, out)` faz parte do concept.** Sem ela, dois modos ficam inexprimíveis:
+o modo dormindo de `docs/wal.md` (que é o que permite rodar as 4 partições da máquina de referência
+sem queimar 4 cores com o mercado fechado) e a espera do EOD. Se a última CQE do grupo do
+`EodMarked` nunca chega, um laço sem prazo giraria para sempre: o motor ficaria vivo, com
+`halted() == false`, sem produzir o snapshot do dia, e o resource server continuaria em D-2 sem que
+nada acusasse a causa. **Um EOD que falha em voz alta é um resultado operacional; um EOD que gira em
+silêncio não é.** É por isso que `await_durable` tem prazo e faz fail-stop ao vencer.
+
+**Por que `FaultBackend` é decorator, e não um quarto backend irmão.** Como irmão, um cenário de
+caos só existe se alguém o reescrever dentro dele — e, como ele não escreve em disco de verdade, a
+cauda rasgada que a recuperação precisa **ler** nunca chega ao arquivo. Como decorator sobre
+`MemBackend`, o teste de recuperação por prefixo válido roda em microssegundos, sem disco e sem
+root; e o **mesmo** plano de falha pode ser reaplicado sobre `PwriteBackend` para conferir que o
+comportamento é o do arquivo real. O roteiro é declarativo — "na 3ª submissão, short write de 8192;
+completions na ordem 2,1,3" — reproduzível na primeira tentativa e legível na revisão, que é o que
+ADR-0023 pediu ao rejeitar "testar só com io_uring e `dm-flakey`".
+
+```cpp
+// src/wal/wal_format.hpp   (FOLHA — só bytes)
+namespace rv::wal {
+
+inline constexpr uint32_t kRecordMagic   = 0x31575652u;   // 'RVW1'
+inline constexpr uint32_t kSegmentMagic  = 0x31475652u;   // 'RVG1'
+inline constexpr uint16_t kFormatVersion = 1;
+inline constexpr uint32_t kMaxGroup      = 64u << 10;                       // 65536
+inline constexpr uint32_t kMaxPayload    = kMaxGroup - 32u;                 // 65504
+inline constexpr uint32_t kFallbackBlock = 4096;          // btrfs não reporta STATX_DIOALIGN
+inline constexpr uint32_t kSegmentHeaderBytes = 4096;
+
+struct alignas(8) WalHdr {          // 32 bytes, little-endian — igual a docs/wal.md
+  uint32_t magic;
+  uint32_t crc32c;                  // header com crc=0, seguido do payload
+  uint64_t lsn;
+  uint64_t ts_ns;                   // auditoria; ignorado no replay
+  uint32_t epoch;                   // por segmento; injetado por EpochSource
+  uint16_t tmpl;                    // == codec::Tmpl
+  uint16_t len;                     // bytes do payload SBE
+};
+static_assert(sizeof(WalHdr) == 32 && alignof(WalHdr) == 8);
+static_assert(std::has_unique_object_representations_v<WalHdr>);
+static_assert(kMaxPayload <= 65535u);                       // cabe em WalHdr::len
+static_assert(sizeof(WalHdr) + kMaxPayload <= kMaxGroup);   // um registro máximo cabe num grupo
+
+struct alignas(kSegmentHeaderBytes) SegmentHeader {   // OCUPA O PRIMEIRO BLOCO INTEIRO
+  uint32_t magic; uint32_t crc32c;                    // do cabeçalho com este campo zerado
+  uint16_t format_version; uint16_t partition_id;
+  uint16_t schema_id;      uint16_t schema_version;
+  uint64_t schema_digest;                             // rotação de segmento quando muda (D7)
+  uint64_t first_lsn;                                 // também é o nome do arquivo
+  uint64_t prev_segment_last_lsn;                     // continuidade verificável na fronteira (I8)
+  uint64_t segment_bytes;
+  uint64_t created_ts_ns;
+  uint32_t epoch;
+  uint32_t block_size; uint8_t block_size_origin;     // 0 = statx, 1 = fallback 4096, 2 = config
+  uint8_t  _pad[kSegmentHeaderBytes - 73];
+};
+static_assert(sizeof(SegmentHeader) == kSegmentHeaderBytes);
+
+[[nodiscard]] constexpr uint32_t record_bytes(uint16_t len) noexcept;   // 32 + len arredondado a 8
+[[nodiscard]] constexpr uint32_t pad_to_block(uint32_t len, uint32_t block) noexcept;
+[[nodiscard]] constexpr uint64_t align_up(uint64_t off, uint32_t block) noexcept;
+}
+```
+
+**Três consertos de formato que valem uma frase cada.**
+
+*`kMaxPayload` era `64 << 10 = 65536`, que **não cabe** em `uint16_t len`.* Um `append` com payload
+de exatamente esse tamanho passava numa checagem escrita como `len <= kMaxPayload` e gravava
+`hdr.len = 0`; na recuperação, `record_bytes(0) = 32` mandaria o leitor procurar o próximo cabeçalho
+no meio do payload anterior, não achar o magic, e tratar como cauda de torn write —
+**truncamento silencioso do log**, com `stop_reason` indistinguível de um fim limpo. Hoje é
+inalcançável (o maior evento tem 420 bytes), mas constantes de formato são contrato e a folha é
+arquivo de barreira. `append` acima do limite devolve `Err::OutOfRange` (rejeitado), e
+`fuzz_record` cobre `len` no limite.
+
+*`SegmentHeader` tem 4096 bytes e `alignas(4096)`, não 48.* Com O_DIRECT o primeiro registro precisa
+começar em offset múltiplo de bloco; um cabeçalho de 48 bytes deixava 4048 bytes de zero entre ele e
+o primeiro registro — a mesma armadilha do padding entre grupos, na primeira leitura de cada
+segmento. Com o cabeçalho ocupando o bloco inteiro, o primeiro registro está alinhado **por
+construção**, não por convenção.
+
+*`prev_segment_last_lsn` e `schema_digest`.* O primeiro dá à recuperação uma checagem de continuidade
+na fronteira entre segmentos, que é onde uma lacuna de LSN passaria despercebida. O segundo faz a
+versão de schema ser **por segmento**: o registro não paga os 4 bytes, a validação é um teste por
+segmento em vez de um por registro, e o `segment_manager` rotaciona quando o digest muda — de modo
+que cada segmento tem exatamente um schema e `test_format_backcompat` (D7) tem algo concreto para
+ler. O desenho anterior não guardava versão de schema em lugar nenhum do WAL:
+`DayOpened.schema_version` é por dia, não por registro, e não ajuda quem está decodificando.
+
+```cpp
+// src/wal/wal.hpp
+namespace rv::wal {
+struct WalOptions {
+  PartitionId partition;
+  const char* dir;
+  uint64_t    window_ns     = 100'000;        // W
+  uint32_t    max_group     = kMaxGroup;
+  uint32_t    max_inflight  = 8;
+  uint64_t    segment_bytes = 1ull << 30;
+  uint32_t    block_size    = 0;              // 0 = descobrir via statx; PROIBIDO 0 em tests/wal
+  uint16_t    schema_id     = codec::kSchemaId;
+  uint16_t    schema_version = codec::kSchemaVersion;
+};
+
+// Onde a recuperação parou e como retomar. Sem este handoff, `open` teria de redescobrir a
+// cauda sozinho — duas implementações da mesma validação, livres para discordar.
+struct WalTail {
+  uint64_t segment_first_lsn;
+  uint64_t resume_offset;     // SEMPRE alinhado a bloco: nunca se reescreve o bloco de cauda (ADR-0013)
+  uint32_t epoch;             // PRESERVADO ao reabrir um segmento existente
+  Lsn      next_lsn;
+};
+
+template <IoBackend B>
+class WalT {                                   // satisfaz core::Journal
+ public:
+  static Result<WalT*> open(Arena&, const WalOptions&, B&, EpochSource&, const WalTail&) noexcept;
+  [[nodiscard]] Result<core::Appended> append(uint16_t tmpl, ByteSpan payload, uint64_t ts_ns) noexcept;
+  [[nodiscard]] Status maybe_submit(uint64_t now_ns) noexcept;
+  [[nodiscard]] Status reap() noexcept;
+  [[nodiscard]] Lsn  durable_lsn() const noexcept;
+  [[nodiscard]] Lsn  last_lsn()    const noexcept;
+  [[nodiscard]] bool halted()      const noexcept;
+  [[nodiscard]] Status force_commit(uint64_t now_ns) noexcept;
+  [[nodiscard]] Status await_durable(Lsn target, uint64_t deadline_ns) noexcept;
+  [[nodiscard]] Status snapshot(const core::PartitionState&, Lsn at) noexcept;
+};
+using Wal = WalT<UringBackend>;                // o alias de produção
+}
+```
+
+**Regras normativas do WAL** (o implementador não desvia sem ADR):
+
+- `append` recusa em exatamente **três** casos: (a) o WAL está em fail-stop; (b) `kMaxInflight`
+  grupos em voo e o buffer corrente não comporta o registro; (c) `sizeof(WalHdr) + len` não cabe em
+  `kMaxGroup`. Os dois primeiros são `Err::WalFull` — **transitórios**, tente na próxima volta. O
+  terceiro é `Err::OutOfRange` e **não é transitório**: um registro que não cabe no grupo nunca vai
+  caber, e tratá-lo como contrapressão transformaria o `if (!a) break;` do loop em laço infinito
+  sem métrica e sem fail-stop.
+- Quando o registro cabe em `kMaxGroup` mas não no **restante** do buffer corrente, `append` fecha o
+  grupo corrente e abre outro — sem esperar a janela `W`. Ele não recebe `now_ns`, então o
+  fechamento por espaço é decisão dele; o fechamento por tempo continua sendo de `maybe_submit`.
+- `maybe_submit` é literalmente o código de `docs/wal.md`; `seg_off_ += cur_.len` acontece **depois**
+  do `pad_to_block` (ADR-0013).
+- `reap` drena sem bloquear; `res` diferente do esperado é fail-stop imediato; `durable_lsn` avança
+  **apenas em ordem FIFO** (I9): grupo N+1 completo com N pendente marca N+1 como pronto e não move
+  `durable_lsn`.
+- Fail-stop é **absorvente**: uma vez em falha, `append` recusa para sempre e a partição só volta
+  por recuperação.
+- **`epoch` entra por injeção** (`wal/epoch.hpp::EpochSource`), nunca por `getrandom()` embutido no
+  `segment_manager`. Sem isso, nenhum teste que crie dois segmentos é comparável entre execuções, e
+  não existe fixture versionada para `test_format_backcompat` nem corpus estável para
+  `fuzz_record` — a técnica normal nesses testes é gravar uma imagem de referência e comparar byte
+  a byte. Mantém também `getrandom` fora do grafo de link que a recuperação usa, o que o
+  `check_determinism.py` enxerga.
+- **`block_size = 0` é proibido em `tests/wal`.** Com descoberta por `statx`, o layout do segmento
+  passa a ser função do sistema de arquivos em que o teste roda: o desenvolvedor em ext4 com
+  DIOALIGN 512 e a CI em btrfs caindo no fallback 4096 exercitariam fronteiras de grupo diferentes,
+  e o teste de I9 — que programa uma **permutação** de completions sobre grupos — embaralharia um
+  conjunto diferente do que o autor escreveu. Continua verde, deixou de testar o que foi desenhado
+  para testar, e um dia falha só na máquina de alguém. A descoberta por `statx` fica para `app/`.
+
+```cpp
+// src/wal/segment_reader.hpp — varrer é uma coisa; aplicar é outra.
+namespace rv::wal {
+enum class ReplayStopReason : uint8_t { Clean, BadMagic, BadCrc, LsnGap, EpochMismatch,
+                                        SegmentDiscontinuity, ShortSegment };
+class SegmentReader {
+ public:
+  [[nodiscard]] Status open(ByteSpan mapped, uint32_t block, Lsn expected_first) noexcept;
+  [[nodiscard]] Result<EventView> next() noexcept;      // valida magic/len/epoch/CRC/lsn
+  [[nodiscard]] ReplayStopReason stop_reason() const noexcept;
+  [[nodiscard]] uint64_t resume_offset() const noexcept; // alinhado a bloco
+};
+}
+```
+
+**A regra de varredura, escrita em termos de BLOCO — o conserto mais importante da recuperação.**
+ADR-0013 e `docs/wal.md` fixam que cada grupo é preenchido com zeros até o fim do bloco, e que a
+reescrita de cauda é experimento, não v1. Logo **os zeros de padding entre grupos são permanentes e
+ficam no meio do log válido, não no fim**. A regra antiga — "a primeira falha encerra o log ali;
+zeros de pré-alocação são fim normal" — pararia a recuperação no fim do **primeiro grupo de cada
+segmento**: com bloco de 4096 e um grupo de três `TradeExecuted` (360 bytes), o cursor chegaria a
+360, leria magic zero, e reportaria fim limpo com `last_valid_lsn = 3`. Um dia de 10M eventos
+gravado em ~50 mil grupos recuperaria **três registros**, e a partição subiria em silêncio porque a
+classificação diz que cauda rasgada não impede subir. As três regras que substituem aquela frase:
+
+1. Um header inválido ou zerado em offset **alinhado a bloco** encerra o log. Este é o fim normal.
+2. Um header inválido em offset **não alinhado** faz `cursor = align_up(cursor, block)` e a varredura
+   **continua**. Este é o padding do grupo anterior.
+3. `lsn == esperado` continua sendo a defesa contra retomar lixo depois do salto; `epoch` e
+   `prev_segment_last_lsn` fecham a fronteira entre segmentos.
+
+`tests/wal/test_padding_traversal.cpp` grava N grupos pequenos sobre `MemBackend` e afirma que o
+leitor devolve exatamente os N×k registros e `ReplayStopReason::Clean`. Nenhum teste anterior cobria
+isto: `test_i8_lsn_monotonic` verifica monotonia, não travessia de padding.
+
+```cpp
+// src/wal/replay.hpp — o ÚNICO ponto em que wal toca core
+namespace rv::wal {
+template <class A>
+concept ApplierPort = requires(A a, const core::EventView& ev) {
+  { a.apply_one(ev) } noexcept -> std::same_as<Status>;
+};
+template <ApplierPort A> [[nodiscard]] Status replay(A&, LogCursor&, RecoveryReport&) noexcept;
+}
+
+// src/wal/recovery.hpp
+namespace rv::wal {
+struct RecoveryReport {
+  Lsn      image_lsn;          // LSN da imagem efetivamente carregada
+  bool     used_fallback_image;// true = a mais recente estava rasgada e caímos para a anterior
+  Lsn      last_valid_lsn;     // onde o log terminou
+  uint64_t records_applied, records_rejected;
+  ReplayStopReason stop_reason;
+  Lsn      fatal_lsn;          // != 0 ⇒ apply devolveu Fatal aqui; a partição fica haltada
+  Err      fatal_err;
+  uint64_t elapsed_ns;         // métrica obrigatória: tempo de recuperação
+};
+
+// `recover` ESCOLHE e carrega a imagem: a mais recente cujo CRC de cabeçalho e de todas as
+// seções valide; cai para a anterior se falhar. Constrói o próprio ApplyContext com
+// core::Outbox::null(). NÃO recebe ApplyContext do chamador.
+[[nodiscard]] Result<RecoveryReport> recover(core::PartitionState&, Metrics&, const char* dir,
+                                             PartitionId, WalTail& tail_out) noexcept;
+}
+```
+
+**Por que `recover` não recebe um `ApplyContext&` com um outbox real — e por que isso não é
+detalhe.** Duas quebras, ambas concretas. **(1) O motor não reiniciava.** O `Outbox` é dimensionado
+para regime permanente com drenagem contínua; durante o replay ninguém drena, porque `ready(durable)`
+só é consultado por `publish_()` no `poll()`, que não roda. Recuperar um dia (10M eventos por
+partição, `docs/wal.md`) encheria os slots, `stage()` devolveria `ArenaExhausted`, que a tabela de
+§3.6 classifica como `Fatal`, e a recuperação abortaria: o RTO deixa de ser ~10 s e passa a ser
+infinito. **(2) Reemissão do que já saiu.** O replay parte de `image_lsn + 1`, que é ≤ `durable_lsn`
+de antes da queda: ele reproduz as saídas de eventos cujas saídas já foram publicadas. Uma
+`Confirmation` duplicada depois de cada `kill -9` é exatamente o que I10 existe para impedir, e
+`test_i10_outbox_gate` não pegaria, porque ele mede o que saiu **antes** da queda.
+
+A regra, escrita: **saídas produzidas durante o replay não são externalizadas**, porque a definição
+de externalizado é "passou por `ready(durable)` de um processo vivo", e um processo que caiu não
+externalizou nada além de `durable_lsn`. `recover` usa `Outbox::null()`, que descarta.
+`tests/chaos/test_i10_restart_no_replay_output.cpp` faz `kill -9`, recupera, e afirma que o sink não
+recebeu **nenhuma** entrada com `lsn <= durable_lsn_pre_queda`.
+
+**O handoff `WalTail`.** `recover` e `Wal::open` precisam concordar sobre onde o log termina, e o
+desenho anterior não os fazia trocar nada — duas implementações da mesma validação, com uma chance
+real de discordarem, e a discordância é permanente: com um CRC ruim no LSN 500 e registros íntegros
+até 519 depois dele, `recover` para em 500 e `open` retomaria em 520, deixando um buraco lógico em
+500..519 para sempre, sem que nenhum assert dispare. Por isso `recover` devolve `WalTail` e
+`open` o **exige**. Duas regras que faltavam: (a) a retomada é sempre no próximo limite de bloco
+depois do último registro válido — nunca se reescreve o bloco de cauda (ADR-0013); (b) reabrir um
+segmento **preserva o `epoch`** do `SegmentHeader`; `epoch` novo só em segmento novo. Sem (b), todos
+os registros já gravados naquele segmento virariam `EpochMismatch` na próxima recuperação e o
+segmento inteiro seria descartado.
+
+```cpp
+// src/wal/state_format.hpp   (FOLHA — a imagem de RECUPERAÇÃO. `edge` nunca a inclui.)
+namespace rv::wal {
+
+inline constexpr uint32_t kStateMagic   = 0x31535652u;   // 'RVS1'
+inline constexpr uint16_t kStateVersion = 1;
+inline constexpr uint32_t kStateHeaderBytes = 4096;
+
+// Uma seção por estrutura de PartitionState (§3.5). A lista é a resposta à pergunta
+// "o que precisa sobreviver a um reinício?" — não à pergunta "o que a borda quer ler?".
+enum class StateSection : uint8_t {
+  SettlementRing = 0,
+  InstrumentSymbol, InstrumentIsin, InstrumentType, InstrumentPriceFactor, InstrumentLotSize,
+  InstrumentClosingPrice, InstrumentPrevClose,
+  AccountSlot, AccountCash, AccountIncomeReceivable, AccountPending,
+  PositionKey, PositionAvailable, PositionBlocked, PositionLeftovers, PositionAvgPrice,
+  PositionPendingBuy, PositionPendingSell, PositionFlags, PositionLastReconDate,
+  TradeBookRow,
+  AppliedActionKey, AppliedActionValue,
+  ExceptionRecord,
+  Count
+};
+
+struct StateSectionRef { uint64_t offset, len; uint32_t elem_size, count, crc32c, reserved; };
+static_assert(sizeof(StateSectionRef) == 32);
+
+struct alignas(kStateHeaderBytes) StateHeader {
+  uint32_t magic; uint32_t header_crc32c;
+  uint16_t format_version; uint16_t partition_id; uint16_t section_count; uint16_t _pad0;
+  uint64_t state_lsn;             // == frozen_at: o LSN EXATO em que a imagem foi tirada
+  uint64_t state_digest;          // == EodMarked.state_digest do dia
+  uint64_t custody_checksum, cash_checksum;
+  uint64_t reference_digest;
+  uint64_t outbox_seq;            // para o replay reproduzir os mesmos `seq` (§3.8)
+  uint32_t base_date, prev_business_date;
+  uint32_t engine_build_id; uint32_t file_bytes_hi_unused;
+  uint64_t file_bytes; uint64_t created_ts_ns;
+  StateSectionRef sections[static_cast<size_t>(StateSection::Count)];
+  uint8_t  reserved[/* até kStateHeaderBytes */];
+};
+static_assert(sizeof(StateHeader) == kStateHeaderBytes);
+}
+```
+
+**Por que `state_format.hpp` existe como formato de primeira classe, separado do de exposição.** O
+desenho anterior listava `state_format.hpp` como arquivo de barreira da Onda 0 e mandava escrevê-lo
+"de §3.6 e §3.9" — mas §3.6 era o `concept Journal` e §3.9 era o snapshot de **exposição**, cujo
+inventário de seções é moldado pelas necessidades da borda. Duas consequências: `core/state_image.cpp`
+(quem escreve) e `wal/recovery.cpp` (quem lê) ficavam sem contrato comum no dia 1, e o inventário do
+que precisa sobreviver a um reinício era confundido com o inventário do que a API expõe. As três
+últimas seções da lista acima — livro de negócios, log de eventos corporativos e fila de exceção —
+**não existem** no snapshot de exposição e são exatamente as que os goldens 06, 13 e 14 provam ser
+estado.
+
+*O que quebrava sem elas, com números:* golden 06, venda de 50 executada em 20260910, snapshot no EOD
+daquele dia, falha de entrega, recompra em 0911, `Liquidado{0915}` no passo 7. Depois de qualquer
+reinício entre 0910 e 0915, o livro de negócios voltaria vazio, `next_state` não acharia o negócio,
+o evento viraria `InvalidTransition` e `a_liq_venda[0910] −= 50` nunca aconteceria. Ao vivo a
+posição fecha em 137; depois de recuperar, fica em 187 **para sempre**, e I1 acusa divergência todo
+dia. E golden 13: a duplicata do evento 903 passaria a valer, e o investidor ganharia 6 ações
+inexistentes.
+
+**Regra de escolha de imagem e de fallback.** `snapshot_writer` grava as duas imagens do mesmo stall
+com `fdatasync` + `rename` + `fsync` do diretório, e só então o manifesto. Se a queda acontece entre
+o `rename` da imagem e a escrita do manifesto, ninguém sabe qual usar — e a implementação natural
+("varrer o diretório e pegar o maior LSN") aceitaria uma imagem cujo CRC não foi validado. Por isso
+**`recover` escolhe**: a mais recente cujo CRC de cabeçalho **e de todas as seções** valide, caindo
+para a anterior se falhar, e reporta em `RecoveryReport` qual usou e quantos LSNs a mais foram
+replicados por causa do fallback.

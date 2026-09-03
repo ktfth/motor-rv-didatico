@@ -60,6 +60,7 @@ bool PartitionState::init(Arena& a, PartitionId pid, const PartitionCapacity& c)
   // A arena NÃO é selada aqui: o `Outbox` e o `Wal` ainda vão alocar dela no warm-up. Quem compõe
   // o processo sela depois de montar tudo — e é o `seal()` que transforma "não aloque no caminho
   // quente" de regra escrita em regra aplicada.
+  arena_bytes = a.used();
   return !a.overflowed();
 }
 

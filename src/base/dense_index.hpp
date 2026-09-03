@@ -90,6 +90,11 @@ class DenseIndex {
   // O tamanho da tabela. Só o teste de dimensionamento e a métrica de memória olham para isto.
   [[nodiscard]] uint32_t slots() const noexcept { return cap_; }
 
+  // Para o stall-and-copy: as TABELAS vivem na arena e são copiadas com ela; só o contador mora
+  // no struct. Restaurar exige que a capacidade seja a mesma — e é, porque o `init` da imagem
+  // usa a mesma configuração. Se não fosse, o `load` recusaria.
+  void restore_size(uint32_t n) noexcept { size_ = n; }
+
   // Percorre em ordem de SLOT, não de inserção. Quem precisa de ordem determinística (o escritor
   // do snapshot, por exemplo) percorre a coluna SoA, que é densa e ordenada por índice — nunca
   // esta tabela. Iterar tabela de hash e depender da ordem é a violação clássica de D4.

@@ -35,6 +35,10 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// `rv::wal::testing` e o `::testing` do GoogleTest têm o mesmo nome curto; o alias
+// resolve a ambiguidade de uma vez, em vez de qualificar cada uso.
+using rv::wal::testing::FaultBackend;
+
 // ------------------------------------------------------------------------------------ utilidades
 
 class DirTemp {
@@ -136,14 +140,15 @@ struct Cenario {
     // (padding de cauda, ADR-0013), um que fecha exatamente, e um de registro único.
     uint32_t off = kSegmentHdrBytes;
     uint64_t lsn = 101;
-    const uint16_t tamanhos[3][3] = {{16, 40, 1000}, {64, 64, 0}, {2048, 0, 0}};
+    // 3 blocos com padding de cauda | 2 registros que fecham o bloco exato | 1 registro
+    const uint16_t tamanhos[3][3] = {{3000, 3000, 3000}, {2016, 2016, 0}, {2048, 0, 0}};
     const uint32_t quantos[3] = {3, 2, 1};
 
     for (uint32_t g = 0; g < 3; ++g) {
       const uint32_t inicio = off;
       for (uint32_t r = 0; r < quantos[g]; ++r) {
         const uint16_t len = tamanhos[g][r];
-        std::byte carga[2048]{};
+        std::byte carga[4096]{};
         for (uint16_t i = 0; i < len; ++i) {
           carga[i] = static_cast<std::byte>((lsn * 31u + i) & 0xFFu);
         }
@@ -161,9 +166,6 @@ struct Cenario {
 
 // Submete todos os grupos e colhe todas as completions. Devolve `false` se alguma falhar.
 [[nodiscard]] bool escrever(IoBackend& be, const Cenario& c, std::vector<Completion>& colhidas) {
-  const int fd_um[1] = {0};  // preenchido pelo chamador via register_files
-  (void)fd_um;
-
   for (uint32_t i = 0; i < c.n; ++i) {
     WriteRequest req{};
     req.buf = c.buf + c.grupos[i].offset;
@@ -256,16 +258,16 @@ TEST(WalFormato, SegmentHdrRegistraOrigemDoBloco) {
   EXPECT_EQ(load_le<uint8_t>(b + 36), static_cast<uint8_t>(BlockSource::Fallback));
   // Padding explícito: zerado na escrita. Um byte de lixo aqui viraria diferença de CRC entre
   // dois segmentos idênticos.
-  EXPECT_EQ(load_le<uint8_t>(b + 37), 0u);
-  EXPECT_EQ(load_le<uint8_t>(b + 38), 0u);
-  EXPECT_EQ(load_le<uint8_t>(b + 39), 0u);
+  EXPECT_EQ(load_le<uint8_t>(b + 37), uint8_t{0});
+  EXPECT_EQ(load_le<uint8_t>(b + 38), uint8_t{0});
+  EXPECT_EQ(load_le<uint8_t>(b + 39), uint8_t{0});
 }
 
 TEST(WalFormato, TetoDePayloadCabeNoCampo) {
   // A razão de `kMaxPayload` ser 65535 e não 65536: com 65536, `len` truncaria para 0.
   WalHdr h{};
   h.len = static_cast<uint16_t>(kMaxPayload);
-  EXPECT_EQ(h.len, 65535u);
+  EXPECT_EQ(static_cast<uint32_t>(h.len), 65535u);
   EXPECT_EQ(static_cast<uint32_t>(h.len), kMaxPayload);
   EXPECT_EQ(record_bytes(kMaxPayload), 32u + 65536u);
 }
@@ -309,7 +311,7 @@ TEST(WalFormato, RegistroCodificadoEValidavel) {
   const auto* h = reinterpret_cast<const WalHdr*>(buf);  // NOLINT: é o que a recuperação faz
   EXPECT_EQ(h->magic, kWalMagic);
   EXPECT_EQ(h->lsn, 42u);
-  EXPECT_EQ(h->len, 10u);
+  EXPECT_EQ(static_cast<uint32_t>(h->len), 10u);
   EXPECT_EQ(h->epoch, kEpoch);
 
   // Revalidação: zera o campo, recalcula, compara. Se o padding entrasse na conta, isto falharia.
@@ -392,7 +394,7 @@ TEST(Backends, MesmosBytesParaAMesmaSequencia) {
     const int fd = abrir(p_fault);
     ASSERT_GE(fd, 0);
     PwriteBackend interno;
-    testing::FaultBackend be{interno};
+    FaultBackend be{interno};
     ASSERT_TRUE(registrar(be, fd, c));
     ASSERT_TRUE(escrever(be, c, c_fault));
     ::close(fd);
@@ -503,10 +505,10 @@ TEST(FaultBackend, EscritaCurtaApareceComoCurta) {
   ASSERT_GE(fd, 0);
 
   PwriteBackend interno;
-  testing::FaultBackend be{interno};
+  FaultBackend be{interno};
   ASSERT_TRUE(registrar(be, fd, c));
 
-  const Grupo& alvo = c.grupos[2];
+  const Grupo& alvo = c.grupos[1];  // o grupo de 3 blocos
   ASSERT_GT(alvo.len, kFallbackBlock);
   be.inject_short_write(alvo.token, kFallbackBlock);  // só o primeiro bloco vai ao disco
 
@@ -545,10 +547,10 @@ TEST(FaultBackend, ErroDeCqeNaoTocaODisco) {
   ASSERT_GE(fd, 0);
 
   PwriteBackend interno;
-  testing::FaultBackend be{interno};
+  FaultBackend be{interno};
   ASSERT_TRUE(registrar(be, fd, c));
 
-  const Grupo& alvo = c.grupos[1];
+  const Grupo& alvo = c.grupos[2];
   be.inject_error(alvo.token, EIO);
 
   std::vector<Completion> colhidas;
@@ -581,7 +583,7 @@ TEST(FaultBackend, CompletionSeguradaSimulaQuedaNoMeioDoGrupo) {
   ASSERT_GE(fd, 0);
 
   PwriteBackend interno;
-  testing::FaultBackend be{interno};
+  FaultBackend be{interno};
   ASSERT_TRUE(registrar(be, fd, c));
 
   const uint64_t preso = c.grupos[1].token;
@@ -626,9 +628,9 @@ TEST(FaultBackend, ReordenaCompletions) {
   ASSERT_GE(fd, 0);
 
   PwriteBackend interno;
-  testing::FaultBackend be{interno};
+  FaultBackend be{interno};
   ASSERT_TRUE(registrar(be, fd, c));
-  be.set_delivery(testing::FaultBackend::Delivery::Lifo);
+  be.set_delivery(FaultBackend::Delivery::Lifo);
 
   for (uint32_t i = 0; i < c.n; ++i) {
     WriteRequest req{};

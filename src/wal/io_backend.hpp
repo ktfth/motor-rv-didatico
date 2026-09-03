@@ -13,6 +13,12 @@
 // dependem de sorte com o dispositivo. ADR-0023 previa parâmetro de template; a decisão que ficou
 // de pé no código é a virtual, pelo motivo acima, e o texto do ADR precisa acompanhar.
 //
+// E a vtable não obriga ninguém a pagá-la: `WalT<B>` continua podendo ser instanciado com a
+// CLASSE CONCRETA (`WalT<UringBackend>`), caso em que o compilador vê o corpo de `submit` e não
+// há chamada indireta nenhuma. A base virtual serve a quem guarda um `IoBackend&` — o harness de
+// falhas e a composição que troca de backend por configuração. Herança e template resolvem
+// perguntas diferentes; usar as duas custa uma vtable que o caminho de produção não consulta.
+//
 // A interface é um COMPROMISSO PÚBLICO: cinco operações, nenhuma delas conhecendo LSN, grupo,
 // segmento ou CRC. O backend transporta bytes; a política de durabilidade é do WAL.
 
@@ -63,9 +69,12 @@ struct Completion {
 static_assert(sizeof(Completion) == 16);
 static_assert(std::is_trivially_copyable_v<Completion>);
 
-// Teto de grupos em voo (docs/wal.md: 8 por padrão). O backend dimensiona a tabela por este valor
-// e recusa o excedente com `WalFull` — falha TRANSITÓRIA: o loop da partição tenta na volta
-// seguinte, depois de colher. Estourar silenciosamente seria perder a ordem FIFO de I9.
+// CAPACIDADE da tabela de pedidos em voo do backend — não é a política. A política de grupos em
+// voo é do WAL e vale 8 por padrão (docs/wal.md); aqui há folga de propósito, para que ajustar a
+// política a partir de uma medição não obrigue a recompilar os três backends.
+//
+// Cheia, `submit` recusa com `WalFull` — falha TRANSITÓRIA: o loop da partição tenta na volta
+// seguinte, depois de colher. Estourar em silêncio seria perder a ordem FIFO de I9.
 inline constexpr uint32_t kMaxInflight = 32;
 
 class IoBackend {

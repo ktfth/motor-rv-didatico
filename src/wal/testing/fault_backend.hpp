@@ -65,8 +65,12 @@ class FaultBackend final : public IoBackend {
   // Segura a completion deste grupo até `release_held()`. O disco recebe a escrita.
   void hold(uint64_t token) noexcept { arm(token, Kind::Hold, 0); }
 
+  // Libera o que já foi colhido E o que ainda está no backend interno: sem a segunda metade,
+  // um `release_held()` chamado antes do `reap` não teria efeito nenhum sobre um pedido que ainda
+  // não voltou — e o teste passaria a depender da ordem em que ele chama as duas funções.
   void release_held() noexcept {
     for (uint32_t i = 0; i < n_pend_; ++i) pend_[i].held = false;
+    for (uint32_t i = 0; i < n_fix_; ++i) fix_[i].hold = false;
   }
   void set_delivery(Delivery d) noexcept { delivery_ = d; }
   void clear_rules() noexcept { n_rules_ = 0; }
