@@ -33,3 +33,29 @@ for automatizável (clang-tidy, sanitizers, flags).
     `bench/baseline.json` ou em `bench/reports/`.
 14. Segurança: parsers de entrada externa (JWS, JSON, TLS) têm harness de fuzz em `tests/edge`;
     limites explícitos de tamanho antes de qualquer parse.
+
+## Conflitos entre regras, e como foram resolvidos
+
+Regra que contradiz outra regra não se resolve por bom senso na hora: resolve-se uma vez, por
+escrito, com o motivo. A lista é curta de propósito.
+
+### §2 (`__int128`) contra §9 (`-Wpedantic -Werror`)
+
+`__int128` é extensão de compilador; `-Wpedantic` a recusa. Descoberto na primeira compilação de
+`src/base/rounding.hpp`. **Resolução:** a extensão é isolada em `src/base/int128.hpp`, que silencia
+o aviso apenas naquele arquivo e exporta `rv::i128` / `rv::u128`. O resto do projeto compila com
+`-Wpedantic` de verdade e nunca escreve `__int128` diretamente. As alternativas descartadas — e por
+quê — estão no cabeçalho do próprio arquivo.
+
+### §4 (`-fno-exceptions` no hot path) contra o uso de GoogleTest
+
+Os binários de teste compilam **com** exceções e linkam bibliotecas compiladas **sem** elas. É
+seguro porque nenhuma das bibliotecas do núcleo lança — a flag remove o mecanismo, não altera a
+ABI das funções que já eram `noexcept`. O que isso permite: `EXPECT_DEATH` e `EXPECT_THROW` nos
+testes de pré-condição, sem afrouxar a regra no código de produção.
+
+### §6 (`sbe-tool`) contra o ambiente
+
+Não há JVM na máquina de referência. Resolvido por ADR-0017: gerador próprio em Python, com o
+mesmo contrato — codecs gerados no build, nunca versionados, nunca editados à mão. A regra §6
+continua valendo; mudou apenas quem a executa.
