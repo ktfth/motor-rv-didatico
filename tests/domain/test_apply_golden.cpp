@@ -267,6 +267,7 @@ TEST(ApplyGolden10, ProventoVerificadoNaoRecalculado) {
 }
 
 // ---------------------------------------------------------------- golden/13
+// I6 — evento corporativo aplica-se uma única vez por (evento, conta).
 TEST(ApplyGolden13, IdempotenciaPorEventoEConta) {
   Engine m;
   abre_dia_e_cadastra(m, k0908, k0909, k0910);
@@ -281,11 +282,11 @@ TEST(ApplyGolden13, IdempotenciaPorEventoEConta) {
   ASSERT_TRUE(m.aplica(e).is_ok());
   EXPECT_EQ(m.disponivel(kCpfA, kPetr4).raw(), Qty::from_units(274).raw());
 
-  // Duplicata: recusada, e o estado não se move.
+  // I6 — duplicata: recusada, e o estado não se move.
   EXPECT_EQ(m.aplica(e).code(), Err::AlreadyApplied);
   EXPECT_EQ(m.disponivel(kCpfA, kPetr4).raw(), Qty::from_units(274).raw());
 
-  // Mesmo evento, OUTRA conta: aplica — a chave inclui a conta.
+  // I6 — mesmo evento, OUTRA conta: aplica, porque a chave inclui a conta.
   auto outra = e;
   outra.account = kCpfB;
   ASSERT_TRUE(m.aplica(outra).is_ok());
@@ -378,4 +379,27 @@ TEST(ApplyFronteira, PayloadCurtoNaoLeForaDosLimites) {
   const core::EventView ev{Lsn{1}, 0, curto, codec::TradeExecuted::kTemplateId, 8, 0};
   core::ApplyContext ctx{&m.outbox(), &m.metricas()};
   EXPECT_EQ(core::apply(m.estado(), ev, ctx).code(), Err::ShortPayload);
+}
+
+TEST(ApplyFronteira, QuantidadeOuPrecoAbsurdoEhRejeitadoSemAbortarOProcesso) {
+  // A classe de defeito mais perigosa que a revisão expôs: caminho de PÂNICO alcançável por dado
+  // que um terceiro controla. `notional_half_even` aborta o processo se o produto não couber em
+  // `Money`, e `qty`/`price` vêm de `TradeExecuted`. Um evento absurdo derrubaria a partição.
+  Engine m;
+  abre_dia_e_cadastra(m, k0908, k0909, k0910);
+  const int64_t absurdo = 9'000'000'000'000'000'000LL;
+
+  EXPECT_EQ(m.aplica(negocio(1, kCpfA, kPetr4, Side::Buy, absurdo, 3'000'000'000, 0, k0910)).code(),
+            Err::Overflow);
+  EXPECT_EQ(m.aplica(negocio(2, kCpfA, kPetr4, Side::Buy, Qty::from_units(1).raw(), absurdo, 0,
+                             k0910)).code(),
+            Err::Overflow);
+  EXPECT_EQ(m.aplica(negocio(3, kCpfA, kPetr4, Side::Buy, Qty::from_units(1).raw(), 3'000'000'000,
+                             absurdo, k0910)).code(),
+            Err::Overflow);
+  EXPECT_EQ(m.estado().trades.count, 0u) << "nenhum entrou na tabela";
+
+  // E o limite é generoso o bastante para o mercado real: 100 milhões de ações a R$ 1.000.000.
+  EXPECT_TRUE(m.aplica(negocio(4, kCpfA, kPetr4, Side::Buy, kMaxQtyRaw, kMaxPriceRaw, 0, k0910))
+                  .is_ok());
 }

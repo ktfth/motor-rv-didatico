@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "base/int128.hpp"
 #include "base/panic.hpp"
 
 namespace rv {
@@ -119,6 +120,23 @@ class Fixed {
 // Por que 1e-4 no DINHEIRO: é a precisão que a API Renda Variável expõe (`"169.1357"`). Escolher
 // a escala interna igual à precisão publicada elimina uma conversão na borda e, com ela, uma
 // classe inteira de erro de arredondamento na saída.
+// Limites de domínio, e por que eles existem no TIPO e não num comentário.
+//
+// `notional_half_even` calcula `qty × price / 1e12` com o produto em `i128` e o resultado em
+// `int64`. Se o resultado não couber, `mul_div` chama `panic_overflow` — isto é, ABORTA O
+// PROCESSO. E `qty` e `price` vêm de `TradeExecuted`, que é entrada externa.
+//
+// Um evento com quantidade e preço absurdos derrubaria a partição inteira. É a mesma classe de
+// defeito do `panic` que havia em `average_price_half_even`: caminho de pânico alcançável a partir
+// de dado que um terceiro controla é indisponibilidade autoinfligida.
+//
+// A correção é rejeitar antes de calcular, e para rejeitar é preciso um limite escrito:
+//   10^8 ações (cem milhões) × R$ 1.000.000 → produto 10^30 em escala 1e-16 → R$ 10^14 em 1e-4,
+//   uma ordem de grandeza abaixo do teto de `int64`. Folgado para a B3 e provado por static_assert.
+inline constexpr int64_t kMaxQtyRaw = 100'000'000LL * 100'000'000LL;    // 10^8 ações, escala 1e-8
+inline constexpr int64_t kMaxPriceRaw = 1'000'000LL * 100'000'000LL;    // R$ 1.000.000, escala 1e-8
+inline constexpr int64_t kMaxMoneyRaw = 100'000'000'000'000LL * 10'000LL / 10;  // ~R$ 10^14
+
 using Qty = Fixed<8, unit::Share>;
 using Price = Fixed<8, unit::BrlPerShare>;
 using Money = Fixed<4, unit::Brl>;
@@ -128,5 +146,21 @@ static_assert(sizeof(Money) == 8 && std::is_trivially_copyable_v<Money>);
 static_assert(!std::is_same_v<Qty, Price>, "a tag de unidade é o que impede trocar os dois");
 static_assert(Qty::kOne == 100'000'000);
 static_assert(Money::kOne == 10'000);
+
+// A margem, provada pelo compilador em vez de conferida por confiança.
+static_assert(static_cast<i128>(kMaxQtyRaw) * kMaxPriceRaw / 1'000'000'000'000LL < INT64_MAX,
+              "o produto máximo de quantidade por preço tem de caber em Money");
+
+// Os dois limites valem para valores vindos de EVENTO. Um bucket acumulado pode passar deles —
+// e passar é `LedgerOverflow`, que é fatal, porque aí a corrupção é interna.
+[[nodiscard]] constexpr bool qty_in_range(int64_t raw) noexcept {
+  return raw >= -kMaxQtyRaw && raw <= kMaxQtyRaw;
+}
+[[nodiscard]] constexpr bool price_in_range(int64_t raw) noexcept {
+  return raw >= 0 && raw <= kMaxPriceRaw;
+}
+[[nodiscard]] constexpr bool money_in_range(int64_t raw) noexcept {
+  return raw >= -kMaxMoneyRaw && raw <= kMaxMoneyRaw;
+}
 
 }  // namespace rv

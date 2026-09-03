@@ -20,3 +20,8 @@ motor_rv_test(test_allocation
   FONTES  test_allocation.cpp
   LIGA    rv::core
   ROTULOS "I2;I3;I5;dominio;alocacao")
+
+motor_rv_test(test_trade_state_machine
+  FONTES  test_trade_state_machine.cpp
+  LIGA    rv::core
+  ROTULOS "I5;dominio;maquina-de-estados")

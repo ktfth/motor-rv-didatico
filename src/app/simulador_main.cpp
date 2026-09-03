@@ -132,11 +132,28 @@ int main(int argc, char** argv) {
 
   // Alimenta e drena intercalado: o ring tem 4096 slots e a sessão tem centenas de milhares de
   // eventos. É também o que o processo de produção faz — o ingress produz, a partição consome.
+  // Cada volta de `poll` drena até 256 eventos; mil voltas sem abrir uma vaga significa parado.
+  constexpr uint32_t kMaxTentativas = 1000;
   uint64_t agora = 0;
   for (const auto& e : eventos) {
     Nucleo& n = *nucleos[e.particao.v];
+    // O ring tem 4096 slots e a sessão tem centenas de milhares de eventos: alimentar e drenar
+    // intercalado é o que o processo de produção faz. Mas o laço precisa de GARANTIA DE PROGRESSO
+    // — se `poll` parar de consumir por uma razão permanente (fail-stop da partição), o ring nunca
+    // abre vaga e o processo gira para sempre, silencioso. Um limite transforma trava em mensagem.
     core::IngressFrame* f = nullptr;
-    while ((f = n.entrada->claim()) == nullptr) n.loop->poll(agora += 1000);
+    uint32_t tentativas = 0;
+    while ((f = n.entrada->claim()) == nullptr) {
+      n.loop->poll(agora += 1000);
+      if (++tentativas > kMaxTentativas) {
+        (void)std::fprintf(stderr,
+                           "motor-rv-sim: partição %u parou de consumir (%s). Eventos entregues: "
+                           "%zu de %zu.\n",
+                           e.particao.v, n.loop->halted() ? "fail-stop" : "sem progresso",
+                           static_cast<size_t>(&e - eventos.data()), eventos.size());
+        return 3;
+      }
+    }
     f->arrival_ts_ns = agora;
     f->tmpl = e.tmpl;
     f->len = e.len;
@@ -148,15 +165,16 @@ int main(int argc, char** argv) {
     }
   }
 
-  (void)std::printf("%-4s %10s %10s %9s %9s %9s %9s %12s\n", "part", "aceitos", "rejeitados", "contas",
-              "posições", "papéis", "negócios", "publicados");
+  (void)std::printf("%-4s %10s %10s %9s %9s %9s %9s %9s %11s\n", "part", "aceitos", "rejeitados",
+                    "contas", "posições", "papéis", "abertos", "baixados", "publicados");
   uint64_t tot_ok = 0, tot_rej = 0;
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
     const Nucleo& n = *nucleos[k];
-    (void)std::printf("%-4u %10" PRIu64 " %10" PRIu64 " %9u %9u %9u %9u %12" PRIu64 "\n", k,
-                n.metricas.apply_accepted, n.metricas.apply_rejected, n.estado.cash.count,
-                n.estado.custody.count, n.estado.instruments.count, n.estado.trades.count,
-                n.loop->published());
+    (void)std::printf("%-4u %10" PRIu64 " %10" PRIu64 " %9u %9u %9u %9u %9" PRIu64 " %11" PRIu64
+                      "\n",
+                      k, n.metricas.apply_accepted, n.metricas.apply_rejected, n.estado.cash.count,
+                      n.estado.custody.count, n.estado.instruments.count, n.estado.trades.count,
+                      n.metricas.trades_closed, n.loop->published());
     tot_ok += n.metricas.apply_accepted;
     tot_rej += n.metricas.apply_rejected;
   }
@@ -209,9 +227,12 @@ int main(int argc, char** argv) {
 
   (void)std::printf("\n== imagem de recuperação (stall-and-copy) ==\n");
   for (uint32_t k = 0; k < cfg.particoes; ++k) {
-    const auto bytes = core::state_image_bytes(nucleos[k]->estado.arena_bytes);
-    (void)std::printf("  partição %u: %.1f MiB de estado\n", k,
-                static_cast<double>(bytes) / (1024.0 * 1024.0));
+    const auto bytes = core::state_image_bytes(nucleos[k]->estado);
+    const auto arena = nucleos[k]->estado.arena_bytes;
+    (void)std::printf("  partição %u: %7.2f MiB de imagem  (arena reservada: %.0f MiB — %.1f%%)\n",
+                      k, static_cast<double>(bytes) / (1024.0 * 1024.0),
+                      static_cast<double>(arena) / (1024.0 * 1024.0),
+                      100.0 * static_cast<double>(bytes) / static_cast<double>(arena));
   }
   return violacoes == 0 ? 0 : 1;
 }

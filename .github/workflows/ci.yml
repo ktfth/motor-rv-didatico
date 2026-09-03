@@ -131,6 +131,35 @@ jobs:
           test "$(sort -u /tmp/part.txt | wc -l)" -eq 1 \
             || { echo "::error::o estado agregado mudou com o número de partições"; cat /tmp/part.txt; exit 1; }
 
+      # A imagem de recuperação tem de ser proporcional ao DADO, não à capacidade configurada.
+      # Ela já foi 126 MiB com dez negócios; o stall diário dependia de quanto alguém dimensionou.
+      - name: a imagem de recuperação escala com o dado
+        run: |
+          pequeno=$(./build/debug/src/app/motor-rv-sim --dias 1 --negocios 10 --investidores 5 \
+                    | awk '/partição 0:/{print $3}')
+          grande=$(./build/debug/src/app/motor-rv-sim --dias 1 --negocios 20000 --investidores 2000 \
+                   | awk '/partição 0:/{print $3}')
+          echo "imagem: 10 negócios = $pequeno MiB | 20000 negócios = $grande MiB"
+          # Se a imagem voltasse a copiar a arena, as duas seriam idênticas (~126 MiB). A
+          # afirmação direta é a de cima: um dia com dez negócios não pode produzir megabytes.
+          awk -v p="$pequeno" -v g="$grande" 'BEGIN{
+            if (p > 5.0)     { print "::error::imagem de 10 negócios = " p " MiB: não escala com o dado"; exit 1 }
+            if (g <= p * 5)  { print "::error::a imagem não cresce com o volume"; exit 1 }
+          }'
+
+      # A tabela de negócios tem de ESTABILIZAR: sem a baixa diária, o limite de quantos dias o
+      # motor roda não é o disco, é a memória.
+      - name: a tabela de negócios estabiliza
+        run: |
+          for d in 4 16; do
+            ./build/debug/src/app/motor-rv-sim --dias $d --negocios 3000 --investidores 300 \
+              | awk -v d=$d '/^0 /{print d, $7}'
+          done | tee /tmp/tab.txt
+          a=$(awk 'NR==1{print $2}' /tmp/tab.txt); b=$(awk 'NR==2{print $2}' /tmp/tab.txt)
+          echo "negócios abertos: 4 dias = $a | 16 dias = $b"
+          test "$b" -lt $((a * 2)) \
+            || { echo "::error::a tabela de negócios cresce com o número de dias"; exit 1; }
+
   tidy:
     name: clang-tidy
     runs-on: ubuntu-24.04

@@ -81,7 +81,20 @@ class PairIndex {
 
   [[nodiscard]] uint32_t size() const noexcept { return size_; }
   [[nodiscard]] uint32_t slots() const noexcept { return cap_; }
-  void restore_size(uint32_t n) noexcept { size_ = n; }
+
+  // Percorre as entradas OCUPADAS, em ordem de slot. É o que permite à imagem de recuperação
+  // gravar `size()` pares em vez de `slots()` — a tabela é esparsa por construção (fator de carga
+  // 0,7), e gravar os buracos é gravar nada com o custo de tudo.
+  //
+  // A ordem é de slot, não de inserção: quem depende de ordem determinística de ITERAÇÃO está
+  // violando D4. Aqui ela serve só para que o conteúdo gravado seja o mesmo em duas execuções da
+  // mesma sequência, e isso a ordem de slot garante.
+  template <class F>
+  void for_each(F&& f) const noexcept {
+    for (uint32_t i = 0; i < cap_; ++i) {
+      if (ocupado_[i] != 0) f(hi_[i], lo_[i]);
+    }
+  }
 
  private:
   [[nodiscard]] uint32_t slot(uint64_t hi, uint32_t lo) const noexcept {
@@ -140,6 +153,23 @@ class TwoGenSet {
   [[nodiscard]] uint32_t size() const noexcept { return gen_[0].size() + gen_[1].size(); }
   [[nodiscard]] DateYmd last_rotation() const noexcept { return rotacao_; }
 
+  // Para a imagem de recuperação: percorre as duas gerações, marcando de qual veio cada par, e
+  // reconstrói na mesma geração. Sem a marca, tudo cairia na geração corrente e a próxima rotação
+  // esqueceria o que ainda estava dentro da janela.
+  template <class F>
+  void for_each(F&& f) const noexcept {
+    gen_[0].for_each([&](uint64_t hi, uint32_t lo) { f(hi, lo, uint32_t{0}); });
+    gen_[1].for_each([&](uint64_t hi, uint32_t lo) { f(hi, lo, uint32_t{1}); });
+  }
+  [[nodiscard]] bool insert_into(uint32_t geracao, uint64_t hi, uint32_t lo) noexcept {
+    bool cheio = false;
+    return gen_[geracao & 1U].insert(hi, lo, cheio) && !cheio;
+  }
+  void set_state(uint32_t atual, DateYmd rotacao) noexcept {
+    atual_ = atual & 1U;
+    rotacao_ = rotacao;
+  }
+
   struct Counters {
     uint32_t size0, size1, atual;
     DateYmd rotacao;
@@ -147,12 +177,9 @@ class TwoGenSet {
   [[nodiscard]] Counters counters() const noexcept {
     return Counters{gen_[0].size(), gen_[1].size(), atual_, rotacao_};
   }
-  void restore(const Counters& c) noexcept {
-    gen_[0].restore_size(c.size0);
-    gen_[1].restore_size(c.size1);
-    atual_ = c.atual;
-    rotacao_ = c.rotacao;
-  }
+  // Não existe `restore(Counters)`: restaurar um TAMANHO sem restaurar as ENTRADAS produziria uma
+  // tabela que diz ter n elementos e não encontra nenhum. A imagem de recuperação grava os pares
+  // (`for_each`) e os reinsere (`insert_into`); os contadores vêm de brinde.
 
  private:
   PairIndex gen_[2];

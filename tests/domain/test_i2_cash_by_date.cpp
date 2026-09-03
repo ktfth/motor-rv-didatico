@@ -101,5 +101,6 @@ TEST(I2, NetDaCamaraDivergenteEhRecusadoERegistrado) {
   ASSERT_TRUE(m.aplica(alocacao(1, 1, kCpfA, kCpfA, 1, Side::Buy, Qty::from_units(100).raw(),
                                 -32'502'000, kD2)).is_ok());
   ASSERT_TRUE(m.aplica(net(2, kCpfA, -32'502'000, kD2, 1)).is_ok());
+  // I5: `Alocado --Net--> Compensado`, a aresta que o lote da câmara dispara.
   EXPECT_EQ(static_cast<core::TradeState>(m.estado().trades.state[0]), core::TradeState::Netted);
 }

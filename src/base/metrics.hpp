@@ -81,6 +81,7 @@ class Metrics {
   uint64_t apply_accepted = 0;
   uint64_t apply_rejected = 0;
   uint64_t apply_fatal = 0;
+  uint64_t trades_closed = 0;  // negócios baixados e compactados na virada do dia
 
   // Contagem EXATA por código, indexada pelo próprio número do `Err`. A primeira versão indexava
   // por (código − 200) num vetor de 16, e a simulação mostrou o problema na hora: metade das

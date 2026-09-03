@@ -103,9 +103,15 @@ template <class T>
   return view_bytes<T>(ByteSpan{ev.payload, ev.len});
 }
 
-[[nodiscard]] Money fees_of(const TradeExecuted& t) noexcept {
-  return Money::from_raw(t.brokerage_fee) + Money::from_raw(t.exchange_fee) +
-         Money::from_raw(t.clearing_fee) + Money::from_raw(t.taxes);
+// Soma dos custos com verificação, e não com `+` que aborta em transbordo: cada parcela vem do
+// evento. Devolve false se a soma não couber — e aí o negócio é rejeitado, não fatal.
+[[nodiscard]] bool fees_of(const TradeExecuted& t, Money& out) noexcept {
+  Money total{};
+  for (const int64_t parcela : {t.brokerage_fee, t.exchange_fee, t.clearing_fee, t.taxes}) {
+    if (!Money::checked_add(total, Money::from_raw(parcela), total)) return false;
+  }
+  out = total;
+  return true;
 }
 
 // A base do preço médio é o que o investidor POSSUI — a quantidade de I1 —, não o que está livre.
@@ -123,7 +129,8 @@ template <class T>
 // Abre o dia e ROTACIONA a janela de liquidação. O que não couber na janela nova venceu sem
 // liquidar e vai para `overdue` — é aqui que a falha de entrega silenciosa é capturada, e é por
 // isso que o bucket `overdue` existe (ver o cabeçalho de core/ledger.hpp).
-[[nodiscard]] Status apply_day_opened(PartitionState& s, const EventView& ev, ApplyContext&) noexcept {
+[[nodiscard]] Status apply_day_opened(PartitionState& s, const EventView& ev,
+                                      ApplyContext& ctx) noexcept {
   const auto r = decode<DayOpened>(ev);
   if (!r) return r.status();
   const DayOpened& e = **r;
@@ -142,12 +149,24 @@ template <class T>
 
   // Rearranja os buckets: cada data antiga vai para o slot que ela ocupa na janela nova, ou para
   // `overdue` se saiu da janela. O percurso é O(posições) e acontece uma vez por dia.
+  // A varredura é O(posições) e acontece uma vez por dia. O que ela NÃO faz é escrever de volta
+  // quando não há nada a mover: a esmagadora maioria das posições não tem nada pendente na virada,
+  // e a versão anterior gastava 96 bytes de escrita em cada uma delas mesmo assim. Ler para
+  // decidir é barato; escrever suja a linha de cache e força a volta dela para a memória.
   for (uint32_t i = 0; i < s.custody.count; ++i) {
+    const uint32_t base_slot = i * kSettlementSlots;
+    bool tem_algo = false;
+    for (uint32_t k = 0; k < kSettlementSlots && !tem_algo; ++k) {
+      tem_algo = !s.custody.pending_buy[base_slot + k].is_zero() ||
+                 !s.custody.pending_sell[base_slot + k].is_zero();
+    }
+    if (!tem_algo) continue;
+
     Qty nb[kSettlementSlots]{};
     Qty ns[kSettlementSlots]{};
     for (uint32_t k = 0; k < kSettlementSlots; ++k) {
-      const Qty b = s.custody.pending_buy[i * kSettlementSlots + k];
-      const Qty v = s.custody.pending_sell[i * kSettlementSlots + k];
+      const Qty b = s.custody.pending_buy[base_slot + k];
+      const Qty v = s.custody.pending_sell[base_slot + k];
       if (b.is_zero() && v.is_zero()) continue;
       const uint32_t j = nova.slot_of(antiga.dates[k]);
       if (j == SettlementWindow::kNoSlot) {
@@ -159,14 +178,21 @@ template <class T>
       }
     }
     for (uint32_t k = 0; k < kSettlementSlots; ++k) {
-      s.custody.pending_buy[i * kSettlementSlots + k] = nb[k];
-      s.custody.pending_sell[i * kSettlementSlots + k] = ns[k];
+      s.custody.pending_buy[base_slot + k] = nb[k];
+      s.custody.pending_sell[base_slot + k] = ns[k];
     }
   }
   for (uint32_t i = 0; i < s.cash.count; ++i) {
+    const uint32_t base_slot = i * kSettlementSlots;
+    bool tem_algo = false;
+    for (uint32_t k = 0; k < kSettlementSlots && !tem_algo; ++k) {
+      tem_algo = !s.cash.pending[base_slot + k].is_zero();
+    }
+    if (!tem_algo) continue;
+
     Money np[kSettlementSlots]{};
     for (uint32_t k = 0; k < kSettlementSlots; ++k) {
-      const Money p = s.cash.pending[i * kSettlementSlots + k];
+      const Money p = s.cash.pending[base_slot + k];
       if (p.is_zero()) continue;
       const uint32_t j = nova.slot_of(antiga.dates[k]);
       if (j == SettlementWindow::kNoSlot) {
@@ -175,7 +201,7 @@ template <class T>
         np[j] += p;
       }
     }
-    for (uint32_t k = 0; k < kSettlementSlots; ++k) s.cash.pending[i * kSettlementSlots + k] = np[k];
+    for (uint32_t k = 0; k < kSettlementSlots; ++k) s.cash.pending[base_slot + k] = np[k];
   }
 
   s.window = nova;
@@ -184,6 +210,11 @@ template <class T>
   // Poda do conjunto de idempotência por DATA DE EVENTO, nunca por relógio (I12 protegendo I6).
   s.applied_actions.maybe_rotate(s.business_date, s.cap.idempotency_window_days);
   s.applied_income.maybe_rotate(s.business_date, s.cap.idempotency_window_days);
+
+  // Baixa e compacta os negócios que terminaram. Tem de vir DEPOIS da rotação da janela: é ela
+  // que define o que "saiu da janela" significa hoje.
+  const uint32_t baixados = s.close_and_compact_trades();
+  if (ctx.metrics != nullptr) ctx.metrics->trades_closed += baixados;
   return kOk;
 }
 
@@ -212,12 +243,20 @@ template <class T>
   const uint32_t pos = s.intern_position(acct, inst);
   if (pos == DenseIndex::kEmpty) return Status::fail(Err::ArenaExhausted);
 
+  // Faixa antes de conta. `notional_half_even` aborta o processo se o produto não couber, e
+  // `qty`/`price` vêm de fora — rejeitar aqui é o que torna aquele `panic` inalcançável por
+  // entrada externa. Ver o bloco de limites em base/fixed.hpp.
+  if (e.qty <= 0 || !qty_in_range(e.qty)) return Status::fail(Err::Overflow, e.instrument);
+  if (!price_in_range(e.price)) return Status::fail(Err::Overflow, e.instrument);
+  for (const int64_t custo : {e.brokerage_fee, e.exchange_fee, e.clearing_fee, e.taxes}) {
+    if (!money_in_range(custo)) return Status::fail(Err::Overflow, e.instrument);
+  }
   const Qty qty = Qty::from_raw(e.qty);
   const Price price = Price::from_raw(e.price);
-  if (qty.raw() <= 0 || price.raw() < 0) return Status::fail(Err::InvalidArgument);
 
   const Money bruto = notional_half_even(qty, price, s.instruments.price_factor[inst]);
-  const Money custos = fees_of(e);
+  Money custos{};
+  if (!fees_of(e, custos)) return Status::fail(Err::Overflow, e.instrument);
   const bool compra = e.side == static_cast<uint8_t>(Side::Buy);
   const bool descoberto_ok = (e.flags & (1U << 1)) != 0;
 
@@ -695,6 +734,9 @@ template <class T>
   // Checagem 2: o bruto bate com posição × taxa dentro de UM CENTAVO — a folga a que o pagador
   // tem direito ao arredondar. É o único cruzamento que liga o dinheiro à posição, e é o que
   // pega um provento com a base de outra conta.
+  if (!qty_in_range(e.qty_basis) || !money_in_range(e.rate_per_share)) {
+    return Status::fail(Err::Overflow, e.instrument);
+  }
   const Money esperado = Money::from_raw(
       mul_div<Rounding::HalfEven>(e.qty_basis, e.rate_per_share, Qty::kOne));
   const int64_t folga = bruto.raw() - esperado.raw();

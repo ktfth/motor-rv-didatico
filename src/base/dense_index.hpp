@@ -98,6 +98,17 @@ class DenseIndex {
   // usa a mesma configuração. Se não fosse, o `load` recusaria.
   void restore_size(uint32_t n) noexcept { size_ = n; }
 
+  // Esvazia a tabela. Endereçamento aberto não tem remoção barata de UMA chave — remover exige
+  // lápide ou reorganização, e as duas são fáceis de errar. Esvaziar tudo e reconstruir a partir
+  // das colunas densas é O(n) e não tem caso especial nenhum. É o que a poda diária faz.
+  void clear() noexcept {
+    for (uint32_t i = 0; i < cap_; ++i) {
+      keys_[i] = 0;
+      vals_[i] = kEmpty;
+    }
+    size_ = 0;
+  }
+
   // Percorre em ordem de SLOT, não de inserção. Quem precisa de ordem determinística (o escritor
   // do snapshot, por exemplo) percorre a coluna SoA, que é densa e ordenada por índice — nunca
   // esta tabela. Iterar tabela de hash e depender da ordem é a violação clássica de D4.

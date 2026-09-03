@@ -73,6 +73,7 @@ TEST(Alocacao, LoteDaOrigemNaoAvancaNegociosDoDestino) {
                                 Qty::from_units(100).raw(), -30'000'000, kD2)).is_ok());
 
   const uint32_t t_investidor = lista_de(m.estado(), m.conta(kCpfA)).at(0);
+  // I5: o negócio do investidor está em `Alocado` e só o lote DELE pode avançá-lo.
   ASSERT_EQ(static_cast<core::TradeState>(m.estado().trades.state[t_investidor]),
             core::TradeState::Allocated);
 

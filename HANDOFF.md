@@ -78,8 +78,14 @@ dos itens 4 e 5, escrita e pronta para reexecução.
 ## Revisão de 03/09 e o que ela mudou
 
 `docs/revisao-2026-09-03.md` traz 45 achados de quatro revisores independentes (nenhum deles autor
-do código que revisou — é a regra de `CLAUDE.md`). **Trinta foram corrigidos**, cada um com teste ou
+do código que revisou — é a regra de `CLAUDE.md`). **Quarenta e um dos 45 foram corrigidos** em duas rodadas, cada um com teste ou
 gate; o que ficou está na tabela "O que ficou, e por quê" do mesmo arquivo.
+
+A segunda rodada fechou os grandes: a imagem de recuperação passou de 126 MiB (proporcional à
+capacidade configurada) para 0,70 MiB com 20 mil negócios (proporcional ao dado); a tabela de
+negócios ganhou baixa diária e **estabiliza** em vez de crescer para sempre; e o gate de
+invariantes passou a exigir que o teste **mencione** o invariante, o que imediatamente acusou I5 e
+I6 rotulados sem verificação.
 
 O padrão dos achados vale mais que a lista: o pior deles — quatro bugs em `apply_trade_allocated` —
 existia porque **nenhum teste exercitava aquele caminho**. Todos alocavam `doc → doc`, o ramo que

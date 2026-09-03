@@ -119,6 +119,70 @@ uint32_t PartitionState::intern_position(uint32_t account, uint32_t instrument) 
   return r;
 }
 
+uint32_t PartitionState::close_and_compact_trades() noexcept {
+  uint32_t destino = 0;
+  uint32_t baixados = 0;
+  for (uint32_t i = 0; i < trades.count; ++i) {
+    const auto estado = static_cast<TradeState>(trades.state[i]);
+    const bool fora_da_janela = window.slot_of(trades.settlement_date[i]) ==
+                                SettlementWindow::kNoSlot;
+    if (estado == TradeState::Settled && fora_da_janela &&
+        next_state(estado, TradeTrigger::Close) == TradeState::Closed) {
+      ++baixados;
+      continue;  // baixado: não sobrevive à compactação
+    }
+    if (destino != i) {
+      trades.trade_id[destino] = trades.trade_id[i];
+      trades.broker_note_id[destino] = trades.broker_note_id[i];
+      trades.account[destino] = trades.account[i];
+      trades.instrument[destino] = trades.instrument[i];
+      trades.qty[destino] = trades.qty[i];
+      trades.price[destino] = trades.price[i];
+      trades.cash[destino] = trades.cash[i];
+      trades.settlement_date[destino] = trades.settlement_date[i];
+      trades.side[destino] = trades.side[i];
+      trades.state[destino] = trades.state[i];
+    }
+    ++destino;
+  }
+  if (baixados == 0) return 0;
+  trades.count = destino;
+
+  // As listas por conta e o índice de negócios apontavam para os índices ANTIGOS. Reconstruir é
+  // O(negócios vivos) e não tem caso especial — o oposto de tentar remendar ponteiros.
+  for (uint32_t a = 0; a < cash.count; ++a) account_first_trade[a] = TradeTable::kNil;
+  for (uint32_t i = trades.count; i-- > 0;) {  // de trás para a frente: preserva a ordem na lista
+    trades.next_of_account[i] = account_first_trade[trades.account[i]];
+    account_first_trade[trades.account[i]] = i;
+  }
+  trade_index.clear();
+  bool novo = false;
+  for (uint32_t i = 0; i < trades.count; ++i) {
+    (void)trade_index.insert_or_get(trades.trade_id[i], i, novo);
+  }
+  return baixados;
+}
+
+bool PartitionState::rebuild_indexes() noexcept {
+  bool novo = false;
+  for (uint32_t i = 0; i < cash.count; ++i) {
+    if (account_index.insert_or_get(account_document[i], i, novo) == DenseIndex::kEmpty) return false;
+  }
+  for (uint32_t i = 0; i < custody.count; ++i) {
+    const uint64_t chave = (static_cast<uint64_t>(custody.account[i]) << 32) | custody.instrument[i];
+    if (position_index.insert_or_get(chave, i, novo) == DenseIndex::kEmpty) return false;
+  }
+  for (uint32_t i = 0; i < instruments.count; ++i) {
+    if (instrument_index.insert_or_get(instruments.external_id[i], i, novo) == DenseIndex::kEmpty) {
+      return false;
+    }
+  }
+  for (uint32_t i = 0; i < trades.count; ++i) {
+    if (trade_index.insert_or_get(trades.trade_id[i], i, novo) == DenseIndex::kEmpty) return false;
+  }
+  return true;
+}
+
 // Os dois checksums que `EodMarked` carrega. Somar em `uint64` com transbordo é DE PROPÓSITO:
 // o valor não significa nada sozinho, ele só precisa mudar quando qualquer bucket mudar. Somar
 // em `int64` com verificação de estouro custaria mais e não acrescentaria nada.

@@ -81,6 +81,7 @@ class Mensagem:
         self.template_id = template_id
         self.descricao = descricao
         self.campos: list[Campo] = []
+        self.block_declarado: "int | None" = None
         self.grupo: "Mensagem | None" = None
         self.grupo_nome = ""
         self.grupo_max = 0
@@ -166,6 +167,7 @@ def ler_schema(caminho: pathlib.Path):
                  "templateId é imutável e único (contrato de determinismo D7).")
         vistos[tid] = nome
         msg = Mensagem(nome, tid, m.get("description", ""))
+        msg.block_declarado = int(m.get("blockLength")) if m.get("blockLength") else None
 
         for f in m.findall("field"):
             fn = f.get("name") or erro(f"<field> sem name em {nome}")
@@ -186,6 +188,7 @@ def ler_schema(caminho: pathlib.Path):
                 ft = f.get("type") or erro(f"<field name={fn}> sem type no grupo {gn}")
                 tc, tam, cnt = resolve_tipo(ft, tipos, enums)
                 sub.campos.append(Campo(fn, tc, tam, cnt, f.get("description", "")))
+            sub.block_declarado = int(g.get("blockLength")) if g.get("blockLength") else None
             msg.grupo, msg.grupo_nome = sub, gn
             msg.grupo_max = int(g.get("maxOccurrences", "0")) or erro(
                 f"<group name={gn}> sem maxOccurrences: sem teto, o payload não tem tamanho máximo")
@@ -217,6 +220,19 @@ def calcula_layout(msg: Mensagem) -> None:
     if off % 8 != 0:
         erro(f"{msg.nome}: blockLength = {off} não é múltiplo de 8. "
              f"Acrescente {8 - off % 8} bytes de padding explícito ao fim.")
+
+    # A conferência que dá ao gerador uma AUTORIDADE fora dele mesmo.
+    #
+    # Sem ela, `blockLength` era derivado da soma dos campos, e os `static_assert` emitidos
+    # comparavam o compilador com a aritmética do próprio gerador — um erro no gerador passaria
+    # despercebido porque os dois lados da comparação vinham da mesma fonte. Com o valor declarado
+    # no XML, o schema manda e o gerador é o verificado.
+    if msg.block_declarado is None:
+        erro(f"{msg.nome}: falta blockLength no XML. Ele é a autoridade sobre o layout do fio; "
+             f"pelos campos declarados, o valor é {off}.")
+    if msg.block_declarado != off:
+        erro(f"{msg.nome}: blockLength declarado {msg.block_declarado}, mas os campos somam {off}. "
+             f"Um dos dois está errado — e é justamente por isso que os dois existem.")
 
 
 # ---------------------------------------------------------------- emissão

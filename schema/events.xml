@@ -6,6 +6,10 @@
     - campos ordenados por alinhamento decrescente (8, 4, 2, 1) e padding EXPLÍCITO até múltiplo
       de 8. O gerador recusa schema mal ordenado em vez de reordenar por conta própria: o layout
       é decisão de quem escreve o formato, não do gerador.
+    - `blockLength` é DECLARADO em cada mensagem e o gerador o CONFERE contra a soma dos campos.
+      Sem a declaração, o número que os `static_assert` comparam com o compilador vinha da
+      aritmética do próprio gerador: ele só provava que o gerador concorda consigo mesmo. Com a
+      declaração, o XML é a autoridade e o gerador é o verificado.
     - templateId é IMUTÁVEL. Mudar o significado de um template existente é proibido (contrato de
       determinismo D7); comportamento novo pede template novo e bump de `version`.
     - dinheiro, quantidade e preço são `int64` com a escala de ADR-0007: 1e-8 para quantidade e
@@ -73,7 +77,7 @@
     </enum>
   </types>
 
-  <sbe:message name="DayOpened" id="1"
+  <sbe:message blockLength="24" name="DayOpened" id="1"
                description="abre o dia com o calendário JÁ resolvido pelo ingress">
     <field name="business_date"      id="1" type="uint32" description="D"/>
     <field name="prev_business_date" id="2" type="uint32" description="D-1 útil: base do snapshot de exposição"/>
@@ -84,7 +88,7 @@
     <field name="pad"                id="7" type="Pad4"/>
   </sbe:message>
 
-  <sbe:message name="TradeExecuted" id="2" description="o negócio como veio do drop copy">
+  <sbe:message blockLength="88" name="TradeExecuted" id="2" description="o negócio como veio do drop copy">
     <field name="trade_id"       id="1"  type="uint64" description="único no dia"/>
     <field name="broker_note_id" id="2"  type="uint64" description="nota de corretagem (R13)"/>
     <field name="account"        id="3"  type="uint64" description="DocumentId do titular na execução"/>
@@ -102,7 +106,7 @@
     <field name="pad"            id="15" type="Pad4"/>
   </sbe:message>
 
-  <sbe:message name="TradeAllocated" id="3" description="alocação ao investidor final; pode fatiar o negócio">
+  <sbe:message blockLength="64" name="TradeAllocated" id="3" description="alocação ao investidor final; pode fatiar o negócio">
     <field name="allocation_id"  id="1" type="uint64"/>
     <field name="trade_id"       id="2" type="uint64"/>
     <field name="from_account"   id="3" type="uint64" description="DocumentId de origem (conta da corretora)"/>
@@ -115,7 +119,7 @@
     <field name="pad"            id="10" type="Pad7"/>
   </sbe:message>
 
-  <sbe:message name="BatchNetted" id="4" description="net multilateral da câmara por conta e data">
+  <sbe:message blockLength="32" name="BatchNetted" id="4" description="net multilateral da câmara por conta e data">
     <field name="batch_id"        id="1" type="uint64"/>
     <field name="account"         id="2" type="uint64" description="DocumentId"/>
     <field name="net_amount"      id="3" type="int64"  description="Money raw; positivo credita"/>
@@ -123,7 +127,7 @@
     <field name="trade_count"     id="5" type="uint32" description="quantos negócios entraram no net"/>
   </sbe:message>
 
-  <sbe:message name="TradeSettled" id="5" description="liquidação ou falha na janela da câmara">
+  <sbe:message blockLength="56" name="TradeSettled" id="5" description="liquidação ou falha na janela da câmara">
     <field name="batch_id"        id="1" type="uint64"/>
     <field name="account"         id="2" type="uint64" description="DocumentId"/>
     <field name="qty"             id="3" type="int64"/>
@@ -136,7 +140,7 @@
     <field name="pad"             id="10" type="Pad6"/>
   </sbe:message>
 
-  <sbe:message name="CorporateActionApplied" id="6"
+  <sbe:message blockLength="88" name="CorporateActionApplied" id="6"
                description="evento corporativo: só FATOS EXTERNOS; o preço médio é calculado pelo apply">
     <field name="action_id"          id="1"  type="uint64" description="chave de idempotência com account (I6)"/>
     <field name="account"            id="2"  type="uint64" description="DocumentId"/>
@@ -156,7 +160,7 @@
     <field name="pad"                id="16" type="Pad6"/>
   </sbe:message>
 
-  <sbe:message name="DividendPaid" id="7"
+  <sbe:message blockLength="72" name="DividendPaid" id="7"
                description="provento em dinheiro; os valores são do pagador — o apply VERIFICA, não recalcula (cenário 10)">
     <field name="action_id"      id="1"  type="uint64"/>
     <field name="account"        id="2"  type="uint64" description="DocumentId"/>
@@ -173,7 +177,7 @@
     <field name="pad"            id="13" type="Pad2"/>
   </sbe:message>
 
-  <sbe:message name="ClosingPriceSet" id="8"
+  <sbe:message blockLength="64" name="ClosingPriceSet" id="8"
                description="fechamento do dia E cadastro do instrumento: o replay reconstrói a tabela sem ler arquivo (I12)">
     <field name="closing_price"  id="1"  type="int64"  description="Price raw"/>
     <field name="previous_close" id="2"  type="int64"  description="Price raw"/>
@@ -188,14 +192,14 @@
     <field name="pad"            id="11" type="Pad6"/>
   </sbe:message>
 
-  <sbe:message name="CustodyReconciled" id="9"
+  <sbe:message blockLength="16" name="CustodyReconciled" id="9"
                description="fatiado: até 16 divergências por evento para caber no slot do ring">
     <field name="date"        id="1" type="uint32"/>
     <field name="chunk_index" id="2" type="uint32"/>
     <field name="chunk_count" id="3" type="uint32"/>
     <field name="flags"       id="4" type="uint8" description="bit0 = último chunk"/>
     <field name="pad"         id="5" type="Pad3"/>
-    <group name="divergence" id="10" maxOccurrences="16" description="depositária menos motor">
+    <group blockLength="24" name="divergence" id="10" maxOccurrences="16" description="depositária menos motor">
       <field name="account"    id="1" type="uint64" description="DocumentId"/>
       <field name="qty_delta"  id="2" type="int64"  description="Qty raw; positivo = depositária tem mais"/>
       <field name="instrument" id="3" type="uint32"/>
@@ -203,7 +207,7 @@
     </group>
   </sbe:message>
 
-  <sbe:message name="EodMarked" id="10"
+  <sbe:message blockLength="32" name="EodMarked" id="10"
                description="fim do dia com âncora de conferência: dois uint64 que I11 compara depois do replay">
     <field name="custody_checksum"  id="1" type="uint64" description="soma dos raw de todos os buckets de quantidade"/>
     <field name="cash_checksum"     id="2" type="uint64" description="soma dos raw de todos os buckets financeiros"/>

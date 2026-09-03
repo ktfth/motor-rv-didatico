@@ -31,7 +31,9 @@
 
 namespace rv {
 using i128 = __int128;
-using u128 = unsigned __int128;
+// Não existe `u128`: ele foi declarado junto com `i128` "por simetria" e nunca teve um chamador.
+// Tipo exportado sem uso é convite para o primeiro uso ser o errado — e num arquivo cujo motivo de
+// existir é isolar uma extensão de compilador, a simetria não vale o convite.
 }  // namespace rv
 
 #if defined(__clang__)

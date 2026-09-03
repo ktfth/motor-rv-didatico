@@ -184,10 +184,9 @@ TEST(I11, ImagemEmKMaisReplayEquivaleAExecucaoInteira) {
     Particao meio;
     for (size_t i = 0; i < k; ++i) (void)meio.aplica(eventos[i], 1000 + i);
 
-    std::vector<std::byte> imagem(core::state_image_bytes(meio.estado.arena_bytes));
+    std::vector<std::byte> imagem(core::state_image_bytes(meio.estado));
     uint64_t escrito = 0;
-    ASSERT_TRUE(core::save_state_image(meio.estado, meio.arena.base(), MutBytes{imagem}, &escrito)
-                    .is_ok())
+    ASSERT_TRUE(core::save_state_image(meio.estado, MutBytes{imagem}, &escrito).is_ok())
         << "k=" << k;
     EXPECT_EQ(escrito, imagem.size());
 
@@ -216,8 +215,8 @@ TEST(I11, ImagemRecusaConfiguracaoDiferente) {
   const auto eventos = gera_sessao(1, 20);
   for (size_t i = 0; i < eventos.size(); ++i) (void)p.aplica(eventos[i], i);
 
-  std::vector<std::byte> imagem(core::state_image_bytes(p.estado.arena_bytes));
-  ASSERT_TRUE(core::save_state_image(p.estado, p.arena.base(), MutBytes{imagem}, nullptr).is_ok());
+  std::vector<std::byte> imagem(core::state_image_bytes(p.estado));
+  ASSERT_TRUE(core::save_state_image(p.estado, MutBytes{imagem}, nullptr).is_ok());
 
   auto* h = reinterpret_cast<core::StateImageHeader*>(imagem.data());
   h->cap.trades *= 2;  // configuração diferente, CRC do cabeçalho agora inválido
@@ -229,8 +228,8 @@ TEST(I11, ImagemRecusaConfiguracaoDiferente) {
 
 TEST(I11, ImagemDetectaCorrupcaoDeCabecalho) {
   Particao p;
-  std::vector<std::byte> imagem(core::state_image_bytes(p.estado.arena_bytes));
-  ASSERT_TRUE(core::save_state_image(p.estado, p.arena.base(), MutBytes{imagem}, nullptr).is_ok());
+  std::vector<std::byte> imagem(core::state_image_bytes(p.estado));
+  ASSERT_TRUE(core::save_state_image(p.estado, MutBytes{imagem}, nullptr).is_ok());
   imagem[8] ^= std::byte{0xFF};
   Particao outra{false};
   EXPECT_EQ(core::load_state_image(outra.estado, outra.arena, ByteSpan{imagem}).code(),

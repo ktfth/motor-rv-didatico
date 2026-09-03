@@ -161,6 +161,28 @@ struct PartitionState {
   [[nodiscard]] uint32_t intern_instrument(uint32_t external_id) noexcept;
   [[nodiscard]] uint32_t intern_position(uint32_t account, uint32_t instrument) noexcept;
 
+  // Reconstrói os quatro índices densos a partir das colunas. Usado pela recuperação: o índice é
+  // cache de uma relação que já está nos dados, e gravá-lo seria gravar a mesma verdade duas
+  // vezes — com o custo do fator de carga.
+  [[nodiscard]] bool rebuild_indexes() noexcept;
+
+  // Baixa os negócios que terminaram e COMPACTA a tabela.
+  //
+  // Sem isto, `TradeTable::count` só cresce: a 10 milhões de eventos por dia, o limite de quantos
+  // dias o motor roda não é o disco, é esta tabela. E as listas encadeadas por conta crescem
+  // junto, o que faz `BatchNetted` e `TradeSettled` percorrerem a história inteira de um
+  // investidor a cada liquidação.
+  //
+  // Um negócio termina quando está `Liquidado` e sua data de liquidação já saiu da janela — a
+  // aresta `Liquidado --> [*]` de docs/dominio.md, que até aqui era inalcançável porque nada
+  // emitia o gatilho `Close`. Falha de entrega NÃO termina: ela fica, com o bucket vencido.
+  //
+  // A compactação é estável (preserva a ordem original), portanto determinística — e é chamada de
+  // dentro do `apply` de `DayOpened`, isto é, dirigida por evento e não por relógio (I12).
+  // Depois dela, a lista de uma conta contém apenas negócios em voo: no máximo os três dias da
+  // janela. É o que transforma o percurso por conta de "história inteira" em "o que está aberto".
+  [[nodiscard]] uint32_t close_and_compact_trades() noexcept;
+
   [[nodiscard]] uint32_t find_position(uint32_t account, uint32_t instrument) const noexcept {
     return position_index.find((static_cast<uint64_t>(account) << 32) | instrument);
   }
