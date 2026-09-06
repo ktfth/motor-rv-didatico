@@ -19,6 +19,7 @@
 
 #include "base/arena.hpp"
 #include "bench/bench_journal.hpp"
+#include "bench/contrato.hpp"
 #include "bench/harness.hpp"
 #include "bench/nucleo_bench.hpp"
 #include "bench/suites.hpp"
@@ -59,7 +60,7 @@ void registra_snapshot(Runner& r, const Carga& carga) {
   const core::PartitionCapacity cap_larga = capacidade_de_medicao();
 
   if (!prepara_estado(*nucleo, carga, *buf_journal, cap_larga)) {
-    (void)r.pula("snapshot", "snapshot.salva.duracao_ms", Forma::DuracaoMs,
+    (void)r.pula("snapshot", kSerieSnapshotSalva, Forma::DuracaoMs,
                  "não consegui construir o estado de origem");
     return;
   }
@@ -76,7 +77,8 @@ void registra_snapshot(Runner& r, const Carga& carga) {
       "proporcional aos DADOS, não à capacidade configurada — é o conserto da revisão de "
       "03/09, e esta série é o que impede que ele volte atrás sem ninguém notar");
 
-  (void)r.medir("snapshot", "snapshot.salva.duracao_ms", Forma::DuracaoMs, [&] {
+  // O nome é o de bench/contrato.hpp — ver a nota em bench_nucleo.cpp.
+  (void)r.medir("snapshot", kSerieSnapshotSalva, Forma::DuracaoMs, [&] {
     uint64_t escritos = 0;
     const uint64_t t0 = agora_ns();
     const Status st = core::save_state_image(nucleo->estado(), MutBytes{*imagem}, &escritos);

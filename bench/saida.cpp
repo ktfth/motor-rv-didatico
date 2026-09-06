@@ -1,6 +1,18 @@
 // A saída do harness: o MESMO esquema de bench/baseline.json, mais o detalhe das séries.
 //
 // ---------------------------------------------------------------------------------------------
+// O BLOCO `metricas` É GERADO DA TABELA, NÃO DIGITADO
+//
+// Ele já foi prosa: sete chaves escritas à mão em `fputs`, com os `null` literais dentro, e a
+// tabela de correspondência série → chave logo acima sendo ignorada pelo texto ao lado dela.
+// Acrescentar uma métrica ao esquema custava editar três lugares e lembrar de todos; esquecer um
+// não dava erro nenhum — dava uma chave a menos no arquivo que o comparador procura por chave.
+//
+// Agora a única descrição do esquema é `kEsquemaMetricas`, em bench/contrato.hpp, e este arquivo
+// a percorre. Uma linha na tabela é uma métrica no JSON, no `metricas_ausentes` e no bloco
+// `contrato` que o relatório em Python consome.
+//
+// ---------------------------------------------------------------------------------------------
 // POR QUE `metricas_ausentes` EXISTE
 //
 // `bench/baseline.json` tem sete métricas obrigatórias e o motor hoje só consegue medir duas.
@@ -9,50 +21,20 @@
 // pergunta "por que a latência do WAL é nula?" e a resposta depende da memória de alguém.
 //
 // Então cada métrica não medida sai com o MOTIVO ao lado, e o motivo é sempre da mesma forma:
-// que peça de código ainda não existe. Quando a peça existir, a linha some sozinha — porque a
-// série passa a ser medida e o mapeamento a preenche.
+// que peça de código ainda não existe. Quando a peça existir, a linha some sozinha — porque
+// `contrato.hpp` passa a nomear a série que a preenche e o motivo sai da tabela.
 
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <string>
 #include <vector>
 
+#include "bench/contrato.hpp"
 #include "bench/harness.hpp"
 
 namespace rv::bench {
 namespace {
-
-// A ponte entre uma série medida e a chave que `bench/baseline.json` publica. Explícita, e não
-// por convenção de nome: a chave do baseline é contrato (o comparador a lê), o nome da série é
-// organização interna. Renomear uma série não pode mudar o contrato em silêncio.
-struct Ponte {
-  const char* serie;
-  const char* chave_baseline;
-};
-
-constexpr Ponte kPontes[] = {
-    {"nucleo.loop.eventos_por_s_por_core", "nucleo.eventos_por_s_por_core"},
-    {"snapshot.salva.duracao_ms", "snapshot.duracao_ms"},
-};
-
-// As métricas do esquema que este binário ainda NÃO consegue medir, e por quê. A frase é o
-// próximo passo do projeto, não uma desculpa.
-struct Ausente {
-  const char* chave;
-  const char* motivo;
-};
-
-constexpr Ausente kAusentes[] = {
-    {"wal.append_para_duravel_us",
-     "o escritor do WAL (segment/group_commit/wal) não existe ainda; só o formato e os backends. "
-     "O piso físico do dispositivo está nas séries wal.*_backend_*"},
-    {"wal.tamanho_grupo_bytes", "não há group commit para agrupar: mesma pendência"},
-    {"wal.grupos_em_voo", "não há group commit: mesma pendência"},
-    {"wal.recuperacao_s",
-     "não há wal/recovery.cpp; a velocidade de reaplicação está em nucleo.apply.eventos_por_s, "
-     "que é o limite superior (sem custo de leitura de disco)"},
-    {"rs.latencia_por_endpoint_ms", "src/edge/ não existe (fase 4)"},
-};
 
 void escapa(std::FILE* f, const std::string& s) {
   (void)std::fputc('"', f);
@@ -94,11 +76,30 @@ void numero(std::FILE* f, double v) {
   (void)std::fprintf(f, "%.4f", v);
 }
 
-[[nodiscard]] const Serie* acha(const std::vector<Serie>& series, const char* nome) {
-  for (const Serie& s : series) {
-    if (s.nome == nome) return &s;
+// Os quantis de uma métrica que ainda não é medida: `{ "p50": null, "p99": null }`. Os nomes vêm
+// da tabela, separados por vírgula, porque a alternativa era outra estrutura para descrever dois
+// literais — e a lista está ao lado do motivo pelo qual eles são nulos.
+void objeto_de_nulos(std::FILE* f, const char* subcampos) {
+  (void)std::fputs("{", f);
+  std::string campo;
+  bool primeiro = true;
+  const auto emite = [&] {
+    if (campo.empty()) return;
+    (void)std::fputs(primeiro ? " " : ", ", f);
+    primeiro = false;
+    escapa(f, campo);
+    (void)std::fputs(": null", f);
+    campo.clear();
+  };
+  for (const char* p = subcampos; *p != '\0'; ++p) {
+    if (*p == ',') {
+      emite();
+    } else {
+      campo += *p;
+    }
   }
-  return nullptr;
+  emite();
+  (void)std::fputs(" }", f);
 }
 
 // Uma série só vira número de baseline se foi medida E ficou estável. É a regra de ADR-0021
@@ -157,46 +158,71 @@ bool escreve_json(const std::string& caminho, const Ambiente& amb, const Config&
                      static_cast<unsigned long long>(carga.semente),
                      static_cast<unsigned long long>(carga.eventos));
 
+  // ------------------------------------------------------------------ contrato
+  // Qual série alimenta cada chave do baseline, e o que a chave significa em português corrente.
+  // Vai no arquivo para que `scripts/relatorio-bench.py` DERIVE daqui as séries que têm de ser
+  // comparadas e os rótulos do resumo, em vez de repetir a tabela em Python — que foi como a
+  // terceira cópia da mesma verdade nasceu.
+  (void)std::fputs("  \"contrato\": [\n", f);
+  bool primeiro = true;
+  for (const Metrica& m : kEsquemaMetricas) {
+    if (m.serie == nullptr) continue;
+    if (!primeiro) (void)std::fputs(",\n", f);
+    primeiro = false;
+    (void)std::fputs("    { \"chave\": ", f);
+    escapa(f, m.chave);
+    (void)std::fputs(", \"serie\": ", f);
+    escapa(f, m.serie);
+    (void)std::fputs(", \"rotulo\": ", f);
+    escapa(f, m.rotulo);
+    (void)std::fputs(" }", f);
+  }
+  (void)std::fputs("\n  ],\n", f);
+
   // ------------------------------------------------------------------ metricas
-  // A ordem e as chaves são as de bench/baseline.json, inclusive as nulas: o comparador casa por
-  // chave, e um arquivo de medição com esquema diferente do baseline não compara nada.
-  const auto por_chave = [&series](const char* chave) -> const Serie* {
-    for (const Ponte& p : kPontes) {
-      if (std::string(p.chave_baseline) == chave) return acha(series, p.serie);
-    }
-    return nullptr;
-  };
-  const Serie* nucleo = por_chave("nucleo.eventos_por_s_por_core");
-  const Serie* snap = por_chave("snapshot.duracao_ms");
-
-  (void)std::fputs("  \"metricas\": {\n    \"nucleo.eventos_por_s_por_core\": ", f);
-  if (publicavel(nucleo))
-    numero(f, nucleo->mediana);
-  else
-    (void)std::fputs("null", f);
-  (void)std::fputs(
-      ",\n    \"wal.append_para_duravel_us\": "
-      "{ \"p50\": null, \"p99\": null, \"p999\": null },\n",
-      f);
-  (void)std::fputs("    \"wal.tamanho_grupo_bytes\": { \"p50\": null, \"p99\": null },\n", f);
-  (void)std::fputs("    \"wal.grupos_em_voo\": { \"p50\": null, \"max\": null },\n", f);
-  (void)std::fputs("    \"wal.recuperacao_s\": null,\n    \"snapshot.duracao_ms\": ", f);
-  if (publicavel(snap))
-    numero(f, snap->mediana);
-  else
-    (void)std::fputs("null", f);
-  (void)std::fputs(",\n    \"rs.latencia_por_endpoint_ms\": {}\n  },\n", f);
-
-  (void)std::fputs("  \"metricas_ausentes\": {\n", f);
-  constexpr size_t kNAusentes = sizeof(kAusentes) / sizeof(kAusentes[0]);
-  for (size_t i = 0; i < kNAusentes; ++i) {
+  // A ordem e as chaves são as de `kEsquemaMetricas`, que é a ordem de bench/baseline.json,
+  // inclusive as nulas: o comparador casa por chave, e um arquivo de medição com esquema
+  // diferente do baseline não compara nada.
+  (void)std::fputs("  \"metricas\": {\n", f);
+  constexpr size_t kNMetricas = std::size(kEsquemaMetricas);
+  for (size_t i = 0; i < kNMetricas; ++i) {
+    const Metrica& m = kEsquemaMetricas[i];
     (void)std::fputs("    ", f);
-    escapa(f, kAusentes[i].chave);
+    escapa(f, m.chave);
     (void)std::fputs(": ", f);
-    escapa(f, kAusentes[i].motivo);
-    (void)std::fputs(i + 1 < kNAusentes ? ",\n" : "\n", f);
+    switch (m.forma) {
+      case FormaValor::Escalar: {
+        const Serie* s = serie_de(series, m.serie);
+        if (publicavel(s)) {
+          numero(f, s->mediana);
+        } else {
+          (void)std::fputs("null", f);
+        }
+        break;
+      }
+      case FormaValor::Objeto:
+        objeto_de_nulos(f, m.subcampos);
+        break;
+      case FormaValor::Mapa:
+        (void)std::fputs("{}", f);
+        break;
+    }
+    (void)std::fputs(i + 1 < kNMetricas ? ",\n" : "\n", f);
   }
   (void)std::fputs("  },\n", f);
+
+  (void)std::fputs("  \"metricas_ausentes\": {\n", f);
+  primeiro = true;
+  for (const Metrica& m : kEsquemaMetricas) {
+    if (m.motivo == nullptr) continue;
+    if (!primeiro) (void)std::fputs(",\n", f);
+    primeiro = false;
+    (void)std::fputs("    ", f);
+    escapa(f, m.chave);
+    (void)std::fputs(": ", f);
+    escapa(f, m.motivo);
+  }
+  (void)std::fputs("\n  },\n", f);
 
   // ------------------------------------------------------------------ series
   (void)std::fputs("  \"series\": [\n", f);

@@ -27,6 +27,12 @@ inteira de o aviso existir.
 | `--comparar ARQ` | confronta com um baseline; **sai != 0** se houver regressão |
 | `--gravar-baseline ARQ` | fixa o baseline; recusa se a medição não for válida |
 
+Códigos de saída de `motor-rv-bench`: **0** ok · **1** erro de execução · **2** uso inválido, recusa
+de gravar baseline, ou série contratual ausente · **3** regressão acima do limiar · **4** a carga do
+baseline é outra e nada foi comparado · **5** comparou sem poder conferir a carga, porque o baseline
+não a declara. O 5 existe porque "as cargas batem" e "não deu para saber se batem" produziam a mesma
+saída, e a segunda era lida como aprovação.
+
 ## O que o harness faz que um `for` com `clock_gettime` não faz
 
 1. **Aquecimento explícito.** As primeiras repetições rodam e são jogadas fora: elas pagam
@@ -44,6 +50,25 @@ inteira de o aviso existir.
 5. **Recusa de baseline inválido.** `--gravar-baseline` falha se o build não for `Release`, se
    houver sanitizer, se os asserts de invariante estiverem ligados ou se qualquer série estiver
    instável.
+
+## Uma métrica, um lugar: `bench/contrato.hpp`
+
+Qual série alimenta cada chave de `bench/baseline.json`, que forma o valor tem no JSON, por que uma
+métrica ainda é nula e como ela se chama em português corrente — tudo isso é UMA tabela,
+`kEsquemaMetricas`. Acrescentar uma métrica ao esquema é acrescentar uma linha ali, e ela aparece
+sozinha no JSON, no `metricas_ausentes`, no comparador e no resumo do relatório.
+
+Essa correspondência já esteve escrita três vezes (no emissor do JSON, no comparador e num default
+digitado no script de relatório). Renomear uma série atualizava uma das três; as outras passavam a
+procurar um nome inexistente — e procurar um nome que não existe é silêncio, não erro. O comparador
+saía **verde** tendo comparado coisa nenhuma. As duas defesas contra a volta disso:
+
+- o nome da série é `constexpr` na tabela e usado no ponto de registro, então renomear é uma linha;
+- `contrato_quebrado()` roda antes de qualquer publicação: se a suíte rodou e a série contratual não
+  apareceu, o harness sai com 2 em vez de gravar um JSON com a métrica obrigatória nula.
+
+O `scripts/relatorio-bench.py` **não copia** a tabela: ele a recebe no bloco `contrato` do próprio
+JSON de medição, e é dali que saem as séries que ele exige comparar e os rótulos do resumo.
 
 ## As três séries do núcleo, e por que não uma
 
@@ -95,9 +120,25 @@ reprova PR inocente até alguém desligá-lo.
 Quem pega 5 % é o outro gate: `motor-rv-bench --comparar bench/baseline.json`, rodado por
 `desempenho` na máquina de referência, onde o baseline vale (ADR-0022).
 
+O relatório abre por um **Resumo**: passou ou não, e as métricas contratuais em uma tabela com
+rótulo em português corrente — é o que o resumo do job do GitHub mostra primeiro. O ambiente, as 24
+séries e as métricas ainda não medidas continuam abaixo, inteiros.
+
+As séries que ele EXIGE comparar vêm do bloco `contrato` do JSON (`--exigir` só sobrepõe). JSON
+antigo, sem esse bloco, não some em silêncio: o resumo diz que não dá para saber quais séries são
+obrigatórias.
+
 Códigos de saída de `relatorio-bench.py`: **0** sem regressão, **1** regressão (o job falha),
 **2** uma série contratual não pôde ser comparada por instabilidade (o job avisa e não falha —
 "está mais lento" e "não deu para olhar" são fatos diferentes).
+
+## O baseline versionado e o esquema
+
+`bench/baseline.json` traz os MESMOS blocos que uma medição gerada — `ambiente`, `harness`, `carga`,
+`metricas` — hoje todos nulos, porque o baseline ainda não foi fixado (ver `status` no arquivo). Os
+blocos vazios não são enfeite: sem `carga` declarada, o comparador não tem contra o que conferir a
+carga desta execução, e é exatamente isso que ele passa a dizer (código 5). Um baseline de verdade
+nunca é escrito à mão — sai de `--gravar-baseline`, que preenche os quatro blocos.
 
 ## Rodar o relatório à mão
 

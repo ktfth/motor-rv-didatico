@@ -76,10 +76,19 @@ jobs:
           python3 - "$RUNNER_TEMP/medicao.json" <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
-          for chave in ("schema", "ambiente", "harness", "carga", "metricas",
+          for chave in ("schema", "ambiente", "harness", "carga", "contrato", "metricas",
                         "metricas_ausentes", "series"):
               assert chave in d, f"falta '{chave}' no JSON da medição"
           assert d["carga"]["eventos"] > 0, "a carga não foi registrada"
+          # O bloco `contrato` é o que diz ao relatório quais séries ele TEM de comparar. Se ele
+          # sumir, ou apontar para uma série que não existe, o gate volta a olhar para nada — e
+          # sem esta conferência ele faria isso em silêncio, que é o defeito inteiro.
+          nomes = {s["nome"] for s in d["series"]}
+          assert d["contrato"], "o bloco 'contrato' veio vazio: o relatório não exigiria série nenhuma"
+          for c in d["contrato"]:
+              assert c["serie"] in nomes, f"contrato aponta para série inexistente: {c['serie']}"
+              assert d["metricas"].get(c["chave"], "ausente") != "ausente", \
+                  f"a chave {c['chave']} do contrato não saiu em 'metricas'"
           assert len(d["series"]) >= 15, f"séries de menos: {len(d['series'])}"
           # Série pulada sem motivo é relatório mentindo por omissão.
           for s in d["series"]:
@@ -139,10 +148,11 @@ jobs:
       # para que o resultado não dependa da máquina.
       - name: o gerador de relatório detecta regressão e ignora ruído
         run: |
-          gera() {  # $1 = arquivo, $2 = fator aplicado à vazão do núcleo
-            python3 - "$1" "$2" <<'PY'
+          gera() {  # $1 = arquivo, $2 = fator na vazão do núcleo, $3 = "instavel" (opcional)
+            python3 - "$1" "$2" "${3:-estavel}" <<'PY'
           import json, sys
           fator = float(sys.argv[2])
+          estavel = sys.argv[3] != "instavel"
           json.dump({
             "schema": 1, "limiar_regressao_pct": 5,
             "ambiente": {"commit": "x", "maquina": "m", "kernel": "k", "flags": "f",
@@ -150,10 +160,16 @@ jobs:
             "harness": {"aquecimento": 2, "repeticoes": 7, "limiar_cv_pct": 5.0, "tentativas": 3},
             "carga": {"dias": 1, "negocios_por_dia": 1, "investidores": 1, "particoes": 1,
                       "semente": 1, "eventos": 1},
+            # O bloco `contrato` é de onde o relatório tira as séries que TEM de comparar (o
+            # harness o emite de bench/contrato.hpp). Sem ele aqui, o teste exercitaria um
+            # caminho que a produção não usa.
+            "contrato": [{"chave": "nucleo.eventos_por_s_por_core",
+                          "serie": "nucleo.loop.eventos_por_s_por_core",
+                          "rotulo": "Eventos por segundo, por core"}],
             "metricas": {}, "metricas_ausentes": {},
             "series": [{"nome": "nucleo.loop.eventos_por_s_por_core", "grupo": "nucleo",
                         "unidade": "ops/s", "direcao": "maior_melhor", "medida": True,
-                        "estavel": True, "mediana": 1000000.0 * fator, "cv_pct": 1.0}],
+                        "estavel": estavel, "mediana": 1000000.0 * fator, "cv_pct": 1.0}],
           }, open(sys.argv[1], "w"))
           PY
           }
@@ -178,8 +194,18 @@ jobs:
           python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/igual.json" \
             --contra "$RUNNER_TEMP/base.json" --saida /dev/null --exigir serie.que.nao.existe
           test $? -eq 2 || { echo "::error::série exigida ausente não produziu código 2"; exit 1; }
+
+          # O mesmo, mas SEM --exigir: a lista de séries obrigatórias tem de vir do bloco
+          # `contrato` do JSON. Se ela voltasse a ser um default digitado no script, ou se o bloco
+          # sumisse, este caso sairia 0 — um relatório dizendo "sem regressão" sobre uma série que
+          # ninguém comparou.
+          gera "$RUNNER_TEMP/instavel.json" 1.00 instavel
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/instavel.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 2 || { echo "::error::série do contrato instável não produziu código 2"; exit 1; }
           set -e
-          echo "queda de 50 % reprovada (1) e série exigida ausente sinalizada (2), como devia"
+          echo "queda de 50 % reprovada (1), série exigida ausente e série do contrato instável"\
+               " sinalizadas (2), como devia"
 
   # --------------------------------------------------------------------------------------------
   # 2. A medição em si, com relatório. Em PR, também compara com a base no MESMO runner.

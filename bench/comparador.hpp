@@ -47,6 +47,17 @@ struct Veredito {
   // Carga diferente da do baseline: NÃO se compara. Ver DescricaoCarga em harness.hpp.
   bool carga_incompativel = false;
   std::string motivo_carga;
+  // Os campos da carga que o baseline não declara — e que por isso NÃO foram conferidos. Existe
+  // porque "as cargas batem" e "não deu para saber se batem" são fatos diferentes, e antes disto
+  // os dois produziam exatamente a mesma saída.
+  std::vector<std::string> carga_nao_conferida;
+  bool execucao_sem_carga = false;
+
+  // Comparou números sem ter podido conferir a carga deles. É o caso que o portão de carga
+  // deixava passar como aprovação; agora ele tem nome, sai no veredito e vira código 5.
+  [[nodiscard]] bool comparou_sem_conferir_carga() const noexcept {
+    return !comparacoes.empty() && (execucao_sem_carga || !carga_nao_conferida.empty());
+  }
 };
 
 // Compara as séries medidas contra `bench/baseline.json`. Métricas nulas no baseline não são
@@ -55,9 +66,16 @@ struct Veredito {
 // Se a carga do baseline for diferente da carga desta execução, nada é comparado: o veredito volta
 // com `carga_incompativel` e o motivo. Comparar assim mediria a diferença entre dois experimentos,
 // não entre duas versões do motor.
+//
+// Se o baseline NÃO declarar a carga, a comparação acontece — um baseline antigo ainda tem números
+// úteis — mas o veredito volta dizendo quais campos ficaram sem conferência. Um portão que não
+// conferiu nada e um portão que aprovou têm de ser distinguíveis por quem lê a saída.
 [[nodiscard]] Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series,
                                double limiar_pct, const DescricaoCarga& carga);
 
-void imprime_veredito(const Veredito& v, double limiar_pct);
+// `arquivo` é o baseline confrontado, e não a constante "bench/baseline.json": o gate também é
+// rodado contra baselines sintéticos (o workflow o faz), e um cabeçalho que nomeia o arquivo
+// errado é a mesma classe de erro que o resto deste arquivo existe para evitar.
+void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& arquivo);
 
 }  // namespace rv::bench

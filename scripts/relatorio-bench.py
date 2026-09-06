@@ -14,8 +14,15 @@ runner, minutos um do outro. É o único arranjo em que a comparação isola a m
 hardware — e é o que este script faz.
 
 O que ele NÃO faz é reimplementar política. A direção de cada métrica ("maior é melhor" ou "menor
-é melhor") e o limiar vêm DO PRÓPRIO JSON, escritos pelo harness. Duas verdades sobre a mesma
-decisão é o começo de um dia ruim; aqui há uma só, e ela mora no C++.
+é melhor"), o limiar, QUAIS séries são contratuais e como cada uma se chama em português corrente
+vêm DO PRÓPRIO JSON, escritos pelo harness a partir de `bench/contrato.hpp`. Duas verdades sobre a
+mesma decisão é o começo de um dia ruim; aqui há uma só, e ela mora no C++.
+
+A lista de séries obrigatórias já foi um default digitado neste arquivo — a terceira cópia de uma
+tabela que também estava em `saida.cpp` e em `comparador.cpp`. Renomear a série atualizava uma
+delas, e as outras passavam a procurar um nome inexistente sem que nada acusasse: o relatório dizia
+"nenhuma regressão" sobre uma métrica que não tinha olhado. Agora a lista vem do bloco `contrato`
+do JSON de medição, e um rename só existe em um lugar.
 
 A regra de ruído
 ----------------
@@ -172,8 +179,162 @@ def num(v):
     return f"{v:.2f}"
 
 
+# Os campos que definem a carga. São os MESMOS cinco que o comparador em C++ confere: `eventos`
+# fica de fora de propósito, porque ele é consequência dos outros e pode variar por uma mudança no
+# simulador, o que é a diferença que se quer medir e não a que invalida a medição.
+CAMPOS_CARGA = ("dias", "negocios_por_dia", "investidores", "particoes", "semente")
+
+
+def carga_divergente(doc_a, doc_b):
+    """Como as cargas dos dois lados diferem, ou None quando batem.
+
+    O comparador em C++ recusa confrontar cargas diferentes (código 4) e este script comparava
+    qualquer par que lhe dessem — mesmo defeito, lado diferente. Um pregão dá 7,3 M eventos/s e
+    três dão 5,4 M da MESMA métrica: comparados entre si, isso vira uma "regressão" de 26 % que não
+    existe, e o gate reprova um PR inocente por medir dois experimentos.
+    """
+    a, b = doc_a.get("carga") or {}, doc_b.get("carga") or {}
+    if not a or not b:
+        return "um dos lados não declara a carga"
+    difs = [f"{c} ({b[c]} na base, {a[c]} neste)" for c in CAMPOS_CARGA
+            if c in a and c in b and a[c] != b[c]]
+    return ", ".join(difs) if difs else None
+
+
+def contrato_de(doc):
+    """As séries contratuais e o nome de cada uma em português corrente.
+
+    Vem do bloco `contrato`, que o harness emite de `bench/contrato.hpp`. JSON sem o bloco é de um
+    harness anterior a ele: aqui a lista sai vazia, e quem chama DIZ isso no relatório em vez de
+    seguir como se não houvesse métrica obrigatória nenhuma.
+    """
+    return [c for c in doc.get("contrato", []) if c.get("serie")]
+
+
+def linha_resumo(e, l, unidade):
+    """Uma métrica contratual em três colunas: o que se mediu, e como ficou contra a base."""
+    if e is None or not e["medida"]:
+        return "não medida nesta execução", "—"
+    valor = f"{num(e['valor'])} {unidade}"
+    if l is None:
+        # Medida, mas fora da comparação: instável de um dos lados, ou sem base. Dizer qual dos
+        # dois é o que separa "não piorou" de "não deu para olhar".
+        return valor, ("instável — fora do veredito" if not e["estavel"] else "sem base")
+    if l["regressao"]:
+        return valor, f"**{l['delta']:+.1f}% — pior**"
+    if l["ganho"]:
+        return valor, f"{l['delta']:+.1f}% — melhor"
+    return valor, f"{l['delta']:+.1f}% — igual, dentro do ruído"
+
+
+def vereditos(tem_base, houve_regressao, faltando, obrigatorias, comparadas, carga_ruim):
+    """O veredito em duas formas: a do resumo (para quem abre o job) e a do detalhe.
+
+    Uma função só porque as duas frases já divergiram: o resumo dizia "não deu para dizer" e, vinte
+    linhas abaixo, o detalhe dizia "nenhuma regressão". Duas conclusões diferentes no mesmo
+    documento é pior que nenhuma — quem lê escolhe a que preferir.
+    """
+    if carga_ruim:
+        return (
+            "**Não dá para comparar os dois lados:** eles mediram cargas diferentes — "
+            f"{carga_ruim}. Números de sessões diferentes não se confrontam; o que está abaixo "
+            "descreve este commit e nada mais.",
+            f"comparação recusada — a base mediu outra carga ({carga_ruim}).",
+        )
+    if not tem_base:
+        return (
+            "**Medição sem comparação.** Não houve uma base para confrontar: os números abaixo "
+            "descrevem este commit, e não dizem se ele ficou mais rápido ou mais lento.",
+            "",
+        )
+    if houve_regressao:
+        return (
+            "**Ficou mais lento.** Pelo menos uma métrica piorou além do que a variação natural "
+            "da máquina explica — a tabela abaixo diz qual.",
+            "há regressão acima do ruído. ADR-0016: nenhuma otimização é aprovável contra um "
+            "baseline que ela mesma derrubou.",
+        )
+    if obrigatorias and not comparadas:
+        # "Nada regrediu" quando nenhuma métrica obrigatória pôde ser comparada é a frase que este
+        # projeto chama de gate verde sem ter feito nada. O relatório diz o que houve: cegueira.
+        return (
+            "**Não deu para dizer.** Nenhuma das métricas obrigatórias pôde ser comparada — elas "
+            "ficaram instáveis demais em algum dos lados. As outras séries não regrediram, mas as "
+            "que decidem não foram olhadas.",
+            "nenhuma regressão entre as séries que deu para comparar — e NENHUMA das métricas "
+            "obrigatórias entrou nessa conta.",
+        )
+    if faltando:
+        return (
+            "**Sem regressão no que deu para comparar.** Nada piorou além da variação natural da "
+            "máquina — mas parte das métricas obrigatórias ficou de fora, e o veredito não fala "
+            "por elas.",
+            "nenhuma regressão acima do ruído entre as séries comparadas; parte das obrigatórias "
+            "ficou de fora.",
+        )
+    return (
+        "**Sem regressão.** Nenhuma métrica piorou além da variação natural da máquina.",
+        "nenhuma regressão acima do ruído.",
+    )
+
+
+def secao_resumo(doc, cabeca, linhas, tem_base, frase, faltando, saida):
+    """As primeiras linhas do relatório: passou ou não, e os poucos números que decidem isso.
+
+    Existe porque o resumo de um job do GitHub é lido por quem quer uma resposta, não por quem vai
+    auditar 24 séries. O detalhe continua embaixo, inteiro; o que muda é que ninguém precisa
+    reconstruir o veredito lendo uma tabela de medianas.
+    """
+    contrato = contrato_de(doc)
+    por_nome = {l["nome"]: l for l in linhas}
+
+    saida.append("## Resumo\n")
+    saida.append(frase + "\n")
+    if contrato:
+        cab = "| o que se mediu | este commit | contra a base |" if tem_base else (
+            "| o que se mediu | medido |"
+        )
+        saida.append(cab)
+        saida.append("|---|---:|---|" if tem_base else "|---|---:|")
+        for c in contrato:
+            e = cabeca.get(c["serie"])
+            unidade = e["unidade"] if e else ""
+            valor, veredito = linha_resumo(e, por_nome.get(c["serie"]), unidade)
+            saida.append(
+                f"| {c['rotulo']} | {valor} | {veredito} |" if tem_base
+                else f"| {c['rotulo']} | {valor} |"
+            )
+    else:
+        saida.append(
+            "_Este JSON não traz o bloco `contrato` (foi gerado por um harness anterior a ele): "
+            "não dá para dizer aqui quais séries são obrigatórias. O detalhe está abaixo._"
+        )
+
+    carga = doc.get("carga") or {}
+    if carga.get("eventos"):
+        saida.append(
+            f"\nMedido sobre {carga['dias']} pregão(ões) simulado(s) — {carga['negocios_por_dia']} "
+            f"negócios por dia e {carga['investidores']} investidores, {carga['eventos']} eventos "
+            "no total."
+        )
+    if faltando:
+        saida.append(
+            "\n> **Atenção:** "
+            + ", ".join(f"`{n}`" for n in faltando)
+            + " não entrou na comparação (ficou instável ou ausente em um dos lados). O veredito "
+            "acima não fala por ela."
+        )
+    if not doc["ambiente"].get("valido_para_baseline", True):
+        saida.append(
+            f"\n> **Estes números não valem como baseline:** "
+            f"{doc['ambiente'].get('por_que_invalido', '?')}."
+        )
+    saida.append("")
+
+
 def secao_ambiente(doc, saida):
     amb, carga, h = doc["ambiente"], doc.get("carga", {}), doc["harness"]
+    saida.append("\n## Ambiente e método\n")
     saida.append("| | |")
     saida.append("|---|---|")
     saida.append(f"| commit | `{amb['commit']}` |")
@@ -276,8 +437,10 @@ def main():
     p.add_argument(
         "--exigir",
         nargs="*",
-        default=["nucleo.loop.eventos_por_s_por_core"],
-        help="séries que TÊM de ser comparáveis; se alguma não for, o script sai com 2",
+        default=None,
+        help="séries que TÊM de ser comparáveis; se alguma não for, o script sai com 2. "
+        "Padrão: as do bloco `contrato` do JSON de medição (que o harness emite de "
+        "bench/contrato.hpp) — não há lista digitada aqui",
     )
     p.add_argument(
         "--sigmas",
@@ -290,8 +453,39 @@ def main():
     docs = carrega(a.medicao)
     cabeca = consolida(docs)
     limiar = a.limiar_pct if a.limiar_pct is not None else docs[0].get("limiar_regressao_pct", 5.0)
+    # A lista de séries obrigatórias vem do JSON, não daqui. Ver contrato_de().
+    exigidas = a.exigir if a.exigir is not None else [c["serie"] for c in contrato_de(docs[0])]
+
+    # A comparação é calculada ANTES de escrever qualquer coisa: o resumo abre o relatório e
+    # precisa do veredito que antes só existia no meio dele.
+    linhas, nao_comparadas, docs_base = [], [], None
+    houve_regressao = False
+    faltando = []
+    carga_ruim = None
+    if a.contra:
+        docs_base = carrega(a.contra)
+        carga_ruim = carga_divergente(docs[0], docs_base[0])
+    if a.contra and not carga_ruim:
+        base = consolida(docs_base)
+        linhas, nao_comparadas = compara(cabeca, base, limiar, a.sigmas)
+        houve_regressao = any(l["regressao"] for l in linhas)
+        # Uma métrica que o projeto trata como contratual não pode sumir da comparação sem que
+        # alguém veja. Aconteceu no teste deste workflow: `nucleo.loop.eventos_por_s_por_core`
+        # ficou instável de um dos lados, saiu para o rodapé de "não comparadas", e o relatório
+        # dizia "nenhuma regressão" sobre a métrica que mais importa — que ele não tinha olhado.
+        # Sumir em silêncio é a única coisa que um relatório não pode fazer.
+        comparadas = {l["nome"] for l in linhas}
+        faltando = [n for n in exigidas if n not in comparadas]
+
+    # As duas frases do veredito saem da MESMA função: o resumo e o detalhe não podem discordar.
+    obrigatorias = [c["serie"] for c in contrato_de(docs[0])]
+    obrig_comparadas = [n for n in obrigatorias if any(l["nome"] == n for l in linhas)]
+    frase_resumo, frase_detalhe = vereditos(
+        bool(a.contra), houve_regressao, faltando, obrigatorias, obrig_comparadas, carga_ruim
+    )
 
     saida = [f"# {a.titulo}\n"]
+    secao_resumo(docs[0], cabeca, linhas, bool(a.contra), frase_resumo, faltando, saida)
     secao_ambiente(docs[0], saida)
     if len(a.medicao) > 1:
         saida.append(
@@ -299,34 +493,16 @@ def main():
             "CV soma a dispersão dentro de uma execução com a dispersão entre execuções._\n"
         )
 
-    houve_regressao = False
-    faltando = []
-    if a.contra:
-        docs_base = carrega(a.contra)
-        base = consolida(docs_base)
+    if a.contra and carga_ruim:
+        saida.append(
+            f"\n> **Comparação recusada:** a base mediu outra carga — {carga_ruim}. É a mesma "
+            "recusa que `motor-rv-bench --comparar` faz com código 4.\n"
+        )
+    if a.contra and not carga_ruim:
         # O commit da base sai no cabeçalho junto com o do PR. Um relatório de comparação que não
         # nomeia os dois lados obriga quem lê a confiar que o CI pegou o par certo.
         saida.append(f"\n_Base comparada: `{docs_base[0]['ambiente']['commit']}`._\n")
-        linhas, nao_comparadas = compara(cabeca, base, limiar, a.sigmas)
-        houve_regressao = any(l["regressao"] for l in linhas)
-
-        # Uma métrica que o projeto trata como contratual não pode sumir da comparação sem que
-        # alguém veja. Aconteceu no teste deste workflow: `nucleo.loop.eventos_por_s_por_core`
-        # ficou instável de um dos lados, saiu para o rodapé de "não comparadas", e o relatório
-        # dizia "nenhuma regressão" sobre a métrica que mais importa — que ele não tinha olhado.
-        # Sumir em silêncio é a única coisa que um relatório não pode fazer.
-        comparadas = {l["nome"] for l in linhas}
-        faltando = [n for n in a.exigir if n not in comparadas]
-        saida.append(
-            "\n> **Veredito:** "
-            + (
-                "há regressão acima do ruído. ADR-0016: nenhuma otimização é aprovável contra um "
-                "baseline que ela mesma derrubou."
-                if houve_regressao
-                else "nenhuma regressão acima do ruído."
-            )
-            + "\n"
-        )
+        saida.append("\n> **Veredito:** " + frase_detalhe + "\n")
         if faltando:
             saida.append(
                 "\n> **Atenção:** a comparação NÃO cobriu "
@@ -357,7 +533,9 @@ def main():
     # e quem chama decide o que fazer com cada um.
     if houve_regressao:
         return 1
-    return 2 if faltando else 0
+    # Carga divergente cai no 2 — "não deu para olhar" — e não no 1: não houve regressão medida,
+    # houve uma comparação que não podia ser feita.
+    return 2 if (faltando or carga_ruim) else 0
 
 
 if __name__ == "__main__":

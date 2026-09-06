@@ -29,6 +29,7 @@
 
 #include "base/metrics.hpp"
 #include "bench/bench_journal.hpp"
+#include "bench/contrato.hpp"
 #include "bench/harness.hpp"
 #include "bench/nucleo_bench.hpp"
 #include "bench/suites.hpp"
@@ -96,13 +97,16 @@ void registra_nucleo(Runner& r, const Carga& carga) {
   const core::PartitionCapacity cap = capacidade_de_medicao();
 
   if (!nucleo->monta(cap)) {
-    (void)r.pula("nucleo", "nucleo.loop.eventos_por_s_por_core", Forma::Taxa,
+    (void)r.pula("nucleo", kSerieNucleoLoop, Forma::Taxa,
                  "a partição não coube na arena de medição");
     return;
   }
 
   // ------------------------------------------------------------ o motor completo
-  (void)r.medir("nucleo", "nucleo.loop.eventos_por_s_por_core", Forma::Taxa, [&] {
+  // O nome vem de bench/contrato.hpp: é ele que o comparador procura no baseline. Literal aqui
+  // seria a quarta cópia da mesma verdade — e a que envelhece primeiro, porque é a que se lê ao
+  // renomear a série.
+  (void)r.medir("nucleo", kSerieNucleoLoop, Forma::Taxa, [&] {
     if (!nucleo->monta(cap)) return Amostra{0, 1};
     BenchJournal diario{buf->data(), buf->size()};
     diario.set_atraso(kAtrasoDurabilidade);

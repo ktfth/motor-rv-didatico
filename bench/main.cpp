@@ -23,6 +23,7 @@
 
 #include "bench/carga.hpp"
 #include "bench/comparador.hpp"
+#include "bench/contrato.hpp"
 #include "bench/harness.hpp"
 #include "bench/suites.hpp"
 
@@ -49,7 +50,12 @@ void uso() {
       "  --out ARQUIVO         grava o JSON da medição (padrão: só a tabela)\n"
       "  --comparar ARQUIVO    confronta com um baseline; sai != 0 se houver regressão\n"
       "  --gravar-baseline ARQ grava o baseline (recusa se a medição não for válida)\n"
-      "  --silencioso          sem progresso no stderr\n");
+      "  --silencioso          sem progresso no stderr\n"
+      "\n"
+      "códigos de saída: 0 ok  |  1 erro de execução  |  2 uso inválido ou recusa de gravar\n"
+      "                  3 regressão acima do limiar\n"
+      "                  4 a carga do baseline é outra: nada foi comparado\n"
+      "                  5 comparou sem poder conferir a carga (o baseline não a declara)\n");
 }
 
 [[nodiscard]] bool tem(const std::string& lista, const char* nome) {
@@ -160,6 +166,23 @@ int main(int argc, char** argv) {
   if (tem(suites, "snapshot")) rv::bench::registra_snapshot(runner, carga);
   if (tem(suites, "wal")) rv::bench::registra_wal(runner, dir_wal);
 
+  // O contrato antes de qualquer publicação: se uma suíte rodou e a série que alimenta uma métrica
+  // obrigatória não está entre as registradas, o nome mudou de um lado só. Publicar assim daria um
+  // JSON com a métrica nula e um comparador que não acha o que procurar — as duas coisas em
+  // silêncio. Ver bench/contrato.hpp.
+  const std::vector<std::string> quebradas = rv::bench::contrato_quebrado(runner.series());
+  if (!quebradas.empty()) {
+    for (const std::string& q : quebradas) {
+      (void)std::fprintf(stderr, "motor-rv-bench: série contratual não registrada: %s\n",
+                         q.c_str());
+    }
+    (void)std::fprintf(stderr,
+                       "A suíte rodou mas a série não apareceu — provavelmente ela foi renomeada "
+                       "só no ponto de registro.\nO nome está em bench/contrato.hpp; mude-o lá e "
+                       "os dois lados o seguem.\n");
+    return 2;
+  }
+
   rv::bench::imprime_tabela(runner.series());
 
   const std::string status =
@@ -196,8 +219,12 @@ int main(int argc, char** argv) {
     }
     const rv::bench::Veredito v =
         rv::bench::compara(doc, runner.series(), limiar, carga.descricao());
-    rv::bench::imprime_veredito(v, limiar);
+    rv::bench::imprime_veredito(v, limiar, baseline);
     if (v.houve_regressao) codigo = 3;
+    // Comparou, mas sem poder conferir a carga: os números podem ser de duas sessões diferentes.
+    // Não é regressão nem aprovação — é um gate que rodou sem uma das suas duas conferências, e
+    // dizer isso com um código próprio é o que impede que ele seja lido como verde.
+    if (v.comparou_sem_conferir_carga()) codigo = 5;
     // Carga incompatível não é regressão, mas também não é aprovação: o gate não conferiu nada.
     if (v.carga_incompativel) codigo = 4;
   }

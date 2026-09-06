@@ -16,6 +16,7 @@ add_executable(motor-rv-bench
   harness.cpp
   saida.cpp
   comparador.cpp
+  contrato.cpp
   carga.cpp
   bench_base.cpp
   bench_nucleo.cpp

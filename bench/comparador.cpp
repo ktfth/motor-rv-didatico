@@ -6,6 +6,8 @@
 #include <fstream>
 #include <sstream>
 
+#include "bench/contrato.hpp"
+
 namespace rv::bench {
 namespace {
 
@@ -176,18 +178,6 @@ class Leitor {
   size_t i_ = 0;
 };
 
-// A ponte série -> chave do baseline. É a MESMA de saida.cpp e por um bom motivo: se o comparador
-// usasse outra, ele compararia uma métrica com o baseline de outra, e o gate passaria verde
-// comparando coisa nenhuma.
-struct Ponte {
-  const char* serie;
-  const char* chave;
-};
-constexpr Ponte kPontes[] = {
-    {"nucleo.loop.eventos_por_s_por_core", "metricas.nucleo.eventos_por_s_por_core"},
-    {"snapshot.salva.duracao_ms", "metricas.snapshot.duracao_ms"},
-};
-
 }  // namespace
 
 bool le_json(const std::string& caminho, DocumentoJson& out, std::string& erro) {
@@ -204,12 +194,17 @@ bool le_json(const std::string& caminho, DocumentoJson& out, std::string& erro) 
 
 namespace {
 
-// Confere um campo da carga contra o baseline. Campo AUSENTE no baseline é aceito com aviso: um
-// baseline antigo, gravado antes de a carga ser registrada, não deve derrubar o gate — mas
-// também não pode passar como se tivesse sido conferido.
+// Confere um campo da carga contra o baseline. Campo AUSENTE no baseline não derruba o gate — um
+// baseline gravado antes de a carga ser registrada continua servindo para comparar números — mas
+// fica REGISTRADO como não conferido, e o veredito o diz. Enquanto ele voltava em silêncio, um
+// baseline sem `carga` atravessava o portão inteiro sem que nada fosse conferido, e a saída era
+// indistinguível da de uma carga que bate.
 void confere_campo(const DocumentoJson& baseline, const char* chave, uint64_t atual, Veredito& v) {
   const auto it = baseline.find(chave);
-  if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) return;
+  if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) {
+    v.carga_nao_conferida.emplace_back(chave);
+    return;
+  }
   const auto do_baseline = static_cast<uint64_t>(it->second.numero);
   if (do_baseline == atual) return;
   v.carga_incompativel = true;
@@ -228,7 +223,11 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
                  const DescricaoCarga& carga) {
   Veredito v;
 
-  if (!carga.vazia()) {
+  if (carga.vazia()) {
+    // Nenhuma suíte com carga rodou (`--suites base,wal`, por exemplo). Não há o que conferir, e
+    // isso também precisa aparecer: o portão de carga não roda, ele não aprova.
+    v.execucao_sem_carga = true;
+  } else {
     confere_campo(baseline, "carga.dias", carga.dias, v);
     confere_campo(baseline, "carga.negocios_por_dia", carga.negocios_por_dia, v);
     confere_campo(baseline, "carga.investidores", carga.investidores, v);
@@ -236,25 +235,24 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
     confere_campo(baseline, "carga.semente", carga.semente, v);
     if (v.carga_incompativel) return v;
   }
-  for (const Ponte& p : kPontes) {
-    const Serie* s = nullptr;
-    for (const Serie& cand : series) {
-      if (cand.nome == p.serie) {
-        s = &cand;
-        break;
-      }
-    }
+  // As métricas comparáveis são as do contrato (bench/contrato.hpp), com o prefixo do documento.
+  // A tabela é a MESMA que `saida.cpp` usa para emitir o JSON: se fossem duas, o comparador
+  // procuraria uma chave que o emissor não escreve, não acharia nada, e diria que está tudo bem.
+  for (const Metrica& m : kEsquemaMetricas) {
+    if (m.serie == nullptr) continue;
+    const Serie* s = serie_de(series, m.serie);
     if (s == nullptr || !s->medida || !s->estavel) continue;
 
-    const auto it = baseline.find(p.chave);
+    const std::string chave = std::string("metricas.") + m.chave;
+    const auto it = baseline.find(chave);
     if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) {
-      v.sem_baseline.push_back(p.chave);
+      v.sem_baseline.push_back(chave);
       continue;
     }
     v.baseline_vazio = false;
 
     Comparacao c;
-    c.chave = p.chave;
+    c.chave = chave;
     c.baseline = it->second.numero;
     c.medido = s->mediana;
     c.direcao = s->direcao;
@@ -271,8 +269,8 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
   return v;
 }
 
-void imprime_veredito(const Veredito& v, double limiar_pct) {
-  (void)std::printf("\n== comparação com bench/baseline.json (limiar %.0f%%) ==\n", limiar_pct);
+void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& arquivo) {
+  (void)std::printf("\n== comparação com %s (limiar %.0f%%) ==\n", arquivo.c_str(), limiar_pct);
   if (v.carga_incompativel) {
     (void)std::printf(
         "  CARGA DIFERENTE da do baseline: %s\n"
@@ -280,6 +278,22 @@ void imprime_veredito(const Veredito& v, double limiar_pct) {
         "  métrica; confrontá-los mediria a diferença entre dois experimentos.\n",
         v.motivo_carga.c_str());
     return;
+  }
+  if (v.execucao_sem_carga || !v.carga_nao_conferida.empty()) {
+    std::string motivo = "esta execução não gerou carga (nenhuma suíte que a use rodou)";
+    if (!v.execucao_sem_carga) {
+      motivo = "o baseline não declara ";
+      for (size_t i = 0; i < v.carga_nao_conferida.size(); ++i) {
+        if (i != 0) motivo += ", ";
+        motivo += v.carga_nao_conferida[i];
+      }
+    }
+    (void)std::printf(
+        "  CARGA NÃO CONFERIDA: %s\n"
+        "  A carga faz parte do número — um pregão dá 7,3 M eventos/s e três dão 5,4 M da MESMA\n"
+        "  métrica. Sem conferi-la, o que vem abaixo pode estar comparando dois experimentos.\n"
+        "  Regrave o baseline com --gravar-baseline para que ele passe a declarar a carga.\n",
+        motivo.c_str());
   }
   if (v.comparacoes.empty() && v.sem_baseline.empty()) {
     (void)std::printf("  nenhuma métrica desta execução tem chave no baseline.\n");
@@ -291,6 +305,11 @@ void imprime_veredito(const Veredito& v, double limiar_pct) {
   for (const Comparacao& c : v.comparacoes) {
     (void)std::printf("  %-44s baseline %12.2f  medido %12.2f  %+7.2f%%  %s\n", c.chave.c_str(),
                       c.baseline, c.medido, c.variacao_pct, c.regressao ? "REGRESSÃO" : "ok");
+  }
+  if (v.comparou_sem_conferir_carga()) {
+    (void)std::printf(
+        "\n  As linhas acima NÃO são aprovação: elas comparam números cuja carga não foi\n"
+        "  conferida. É o que o código de saída 5 diz.\n");
   }
   if (v.houve_regressao) {
     (void)std::printf(

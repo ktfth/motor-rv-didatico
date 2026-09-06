@@ -3,6 +3,8 @@
   "status": "sem baseline: o harness existe (bench/, ADR-0021) e foi exercitado ponta a ponta, mas a medição de 06/09/2026 foi feita fora da máquina de referência de docs/ambiente.md e ADR-0022 proíbe promover número de outra máquina. Fixar com `motor-rv-bench --repeticoes 15 --gravar-baseline bench/baseline.json` na máquina de referência. Números e achados: bench/reports/2026-09-06-medicao-inicial.md",
   "limiar_regressao_pct": 5,
   "ambiente": { "commit": null, "maquina": null, "kernel": null, "flags": null, "dispositivo_wal": null },
+  "harness": { "aquecimento": null, "repeticoes": null, "limiar_cv_pct": null, "tentativas": null },
+  "carga": { "dias": null, "negocios_por_dia": null, "investidores": null, "particoes": null, "semente": null, "eventos": null },
   "metricas": {
     "nucleo.eventos_por_s_por_core": null,
     "wal.append_para_duravel_us": { "p50": null, "p99": null, "p999": null },

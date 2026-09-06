@@ -54,6 +54,44 @@ seguro porque nenhuma das bibliotecas do núcleo lança — a flag remove o meca
 ABI das funções que já eram `noexcept`. O que isso permite: `EXPECT_DEATH` e `EXPECT_THROW` nos
 testes de pré-condição, sem afrouxar a regra no código de produção.
 
+### CLAUDE.md §Idioma contra o português de `bench/`, `src/app/` e do simulador de `src/ingress/`
+
+Descoberto ao revisar `bench/`: o diretório é português inteiro (`Serie`, `medir`, `Carga`,
+`Ambiente`), enquanto `src/base`, `src/codec`, `src/core`, `src/format` e `src/wal` são inglês
+inteiro. `src/app/` e o simulador de `src/ingress/` divergem do mesmo jeito e há mais tempo
+(`Instrumento`, `DiaDePregao`, `EventoRoteado`, `ConfigSimulacao`).
+
+**Resolução:** a regra vale, e o escopo dela é o **código do motor** — as camadas cujos
+identificadores são internos e nunca saem do binário: `base`, `codec`, `core`, `format`, `wal`,
+`edge`. Ali o vocabulário vem das especificações que o projeto implementa (SBE, WAL, ledger, FAPI,
+Open Finance), que são em inglês; traduzi-lo cobraria uma tradução em cada leitura cruzada com a
+especificação, que é a leitura que mais acontece nessas camadas.
+
+Ela **não** vale para as camadas de ferramenta — `bench/`, `src/app/` e o simulador de
+`src/ingress/` — pelo que as distingue: ali o identificador **é** o vocabulário publicado.
+`--negocios` é opção de linha de comando; `carga` e `metricas` são chaves do JSON que o comparador
+lê e que `bench/baseline.json` versiona; `Instrumento` e `DiaDePregao` são as colunas dos CSVs da
+B3. CLI, esquema de arquivo e dado de entrada são **documento**, e documento é português pela mesma
+frase de CLAUDE.md que pede inglês nos identificadores. Chamar `Carga` de `Load` enquanto a chave
+do JSON continua `carga` instalaria uma tradução por par nome↔chave — a mesma duplicação de verdade
+que `bench/contrato.hpp` acabou de tirar deste diretório, reintroduzida por regra.
+
+Daqui em diante:
+
+1. Código de motor: identificadores em inglês, sem exceção.
+2. Camada de ferramenta: português no que nomeia algo publicado (opção de CLI, chave de arquivo,
+   seção de relatório, coluna de CSV); inglês no resto, que é infraestrutura e não vocabulário —
+   `Histogram`, vindo de `src/base`, continua `Histogram` dentro de `bench/`.
+3. Nada de renomeação em massa. Isto vale para código novo e para o arquivo que já for reescrito
+   por outro motivo; a divergência existente fica onde está.
+4. `Partitioner` (inglês) conviver com `EventoRoteado` (português) dentro de `src/ingress/` é
+   consequência aceita: o particionador é motor, o simulador é ferramenta. A linha que separa é a
+   função da camada, não o diretório.
+
+Descartadas: renomear `bench/` para inglês (churn grande, risco alto e — porque as chaves do JSON
+continuariam em português — produziria justamente a tradução do parágrafo acima); e afrouxar
+§Idioma para "tanto faz", que apagaria o motivo pelo qual `core` é inglês.
+
 ### §6 (`sbe-tool`) contra o ambiente
 
 Não há JVM na máquina de referência. Resolvido por ADR-0017: gerador próprio em Python, com o
