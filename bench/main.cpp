@@ -50,12 +50,18 @@ void uso() {
       "  --out ARQUIVO         grava o JSON da medição (padrão: só a tabela)\n"
       "  --comparar ARQUIVO    confronta com um baseline; sai != 0 se houver regressão\n"
       "  --gravar-baseline ARQ grava o baseline (recusa se a medição não for válida)\n"
+      "  --conferir-esquema ARQ confere as chaves de um baseline contra bench/contrato.hpp\n"
+      "                        e sai != 0 na divergência; não mede nada\n"
       "  --silencioso          sem progresso no stderr\n"
       "\n"
       "códigos de saída: 0 ok  |  1 erro de execução  |  2 uso inválido ou recusa de gravar\n"
       "                  3 regressão acima do limiar\n"
       "                  4 a carga do baseline é outra: nada foi comparado\n"
-      "                  5 comparou sem poder conferir a carga (o baseline não a declara)\n");
+      "                  5 comparou sem poder conferir a carga (o baseline não a declara)\n"
+      "                  6 métrica contratual não comparada (sem número no baseline, ou\n"
+      "                    medida como instável/pulada nesta execução)\n"
+      "                  (precedência: 3 antes de 4, 4 antes de 6, 6 antes de 5 — uma regressão\n"
+      "                   medida nunca é mascarada por uma conferência que faltou)\n");
 }
 
 [[nodiscard]] bool tem(const std::string& lista, const char* nome) {
@@ -72,6 +78,7 @@ int main(int argc, char** argv) {
   std::string saida;
   std::string baseline;
   std::string gravar;
+  std::string conferir;
   uint32_t dias = 1, negocios = 20000, investidores = 2000;
   uint64_t semente = 20260902;
   const uint32_t data_inicial = 20260902;
@@ -112,12 +119,43 @@ int main(int argc, char** argv) {
       baseline = argv[++i];
     else if (a == "--gravar-baseline" && tem_valor)
       gravar = argv[++i];
+    else if (a == "--conferir-esquema" && tem_valor)
+      conferir = argv[++i];
     else if (a == "--silencioso")
       cfg.verboso = false;
     else {
       uso();
       return (a == "--help" || a == "-h") ? 0 : 2;
     }
+  }
+
+  // Conferir o esquema não mede nada: é um gate de arquivo, e roda antes de o harness montar
+  // qualquer coisa (o CI o chama sobre `bench/baseline.json` a cada PR).
+  if (!conferir.empty()) {
+    rv::bench::DocumentoJson doc;
+    std::string erro;
+    if (!rv::bench::le_json(conferir, doc, erro)) {
+      (void)std::fprintf(stderr, "motor-rv-bench: %s\n", erro.c_str());
+      return 1;
+    }
+    std::vector<std::string> caminhos;
+    caminhos.reserve(doc.size());
+    for (const auto& [chave, valor] : doc) caminhos.push_back(chave);
+    const std::vector<std::string> ruins = rv::bench::divergencias_de_esquema(caminhos);
+    if (ruins.empty()) {
+      (void)std::printf("%s: as chaves de `metricas` batem com bench/contrato.hpp\n",
+                        conferir.c_str());
+      return 0;
+    }
+    for (const std::string& r : ruins) {
+      (void)std::fprintf(stderr, "motor-rv-bench: %s: %s\n", conferir.c_str(), r.c_str());
+    }
+    (void)std::fprintf(stderr,
+                       "O arquivo de baseline é versionado à mão e não pode divergir do esquema: "
+                       "chave que o comparador\nprocura e não acha sai como \"SEM BASELINE\" — "
+                       "um gate que não compara nada. Corrija o arquivo\nou bench/contrato.hpp, "
+                       "conforme quem estiver certo.\n");
+    return 2;
   }
 
   if (cfg.repeticoes < 2 || cfg.tentativas < 1) {
@@ -220,13 +258,23 @@ int main(int argc, char** argv) {
     const rv::bench::Veredito v =
         rv::bench::compara(doc, runner.series(), limiar, carga.descricao());
     rv::bench::imprime_veredito(v, limiar, baseline);
-    if (v.houve_regressao) codigo = 3;
-    // Comparou, mas sem poder conferir a carga: os números podem ser de duas sessões diferentes.
-    // Não é regressão nem aprovação — é um gate que rodou sem uma das suas duas conferências, e
-    // dizer isso com um código próprio é o que impede que ele seja lido como verde.
-    if (v.comparou_sem_conferir_carga()) codigo = 5;
-    // Carga incompatível não é regressão, mas também não é aprovação: o gate não conferiu nada.
-    if (v.carga_incompativel) codigo = 4;
+    // Precedência explícita, e ela importa: enquanto os três `if` eram independentes e o 5 vinha
+    // por último, QUALQUER baseline sem bloco `carga` — todos os anteriores a esta mudança —
+    // transformava uma regressão medida em 5, com o stdout gritando REGRESSÃO e o `bench.yml`
+    // conferindo `test $? -eq 3`. Uma regressão medida não é mascarada por uma conferência que
+    // faltou.
+    if (v.houve_regressao) {
+      codigo = 3;
+    } else if (v.carga_incompativel) {
+      codigo = 4;  // nada foi comparado: nem regressão, nem aprovação
+    } else if (!v.sem_baseline.empty() || !v.nao_comparadas.empty()) {
+      // Métrica contratual sem número no baseline. Sair 0 aqui era o mesmo gate verde de sempre:
+      // "SEM BASELINE — nada a comparar" impresso, e o processo dizendo que passou.
+      codigo = 6;
+    } else if (v.comparou_sem_conferir_carga()) {
+      // Comparou, mas sem poder conferir a carga: os números podem ser de duas sessões diferentes.
+      codigo = 5;
+    }
   }
 
   if (!gravar.empty()) {

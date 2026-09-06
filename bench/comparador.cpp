@@ -228,11 +228,11 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
     // isso também precisa aparecer: o portão de carga não roda, ele não aprova.
     v.execucao_sem_carga = true;
   } else {
-    confere_campo(baseline, "carga.dias", carga.dias, v);
-    confere_campo(baseline, "carga.negocios_por_dia", carga.negocios_por_dia, v);
-    confere_campo(baseline, "carga.investidores", carga.investidores, v);
-    confere_campo(baseline, "carga.particoes", carga.particoes, v);
-    confere_campo(baseline, "carga.semente", carga.semente, v);
+    // Os campos vêm de `campos_da_carga` (bench/contrato.hpp), a mesma lista que o JSON publica
+    // para o relatório em Python. Enumerá-los aqui de novo era a segunda cópia dela.
+    for (const auto& [nome, valor] : campos_da_carga(carga)) {
+      confere_campo(baseline, ("carga." + nome).c_str(), valor, v);
+    }
     if (v.carga_incompativel) return v;
   }
   // As métricas comparáveis são as do contrato (bench/contrato.hpp), com o prefixo do documento.
@@ -241,9 +241,22 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
   for (const Metrica& m : kEsquemaMetricas) {
     if (m.serie == nullptr) continue;
     const Serie* s = serie_de(series, m.serie);
-    if (s == nullptr || !s->medida || !s->estavel) continue;
-
+    // Série ausente = a suíte dela não rodou nesta execução (`--suites nucleo`, por exemplo).
+    // Isso é escolha de quem chamou, não falha do gate. Já `pulada` e `instável` são medições que
+    // saíram ruins, e sumir com elas por um `continue` era o gate ficando verde sem a linha que
+    // decide.
+    if (s == nullptr) continue;
     const std::string chave = std::string("metricas.") + m.chave;
+    if (!s->medida) {
+      v.nao_comparadas.push_back(chave + " (série pulada: " + s->nota + ")");
+      continue;
+    }
+    if (!s->estavel) {
+      v.nao_comparadas.push_back(chave + " (série instável nesta execução, CV " +
+                                 std::to_string(static_cast<int>(s->cv_pct)) + "%)");
+      continue;
+    }
+
     const auto it = baseline.find(chave);
     if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) {
       v.sem_baseline.push_back(chave);
@@ -295,12 +308,23 @@ void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& a
         "  Regrave o baseline com --gravar-baseline para que ele passe a declarar a carga.\n",
         motivo.c_str());
   }
-  if (v.comparacoes.empty() && v.sem_baseline.empty()) {
+  for (const std::string& k : v.nao_comparadas) {
+    (void)std::printf("  %-44s NÃO COMPARADA — %s\n", k.substr(0, k.find(' ')).c_str(),
+                      k.substr(k.find('(')).c_str());
+  }
+  if (v.comparacoes.empty() && v.sem_baseline.empty() && v.nao_comparadas.empty()) {
     (void)std::printf("  nenhuma métrica desta execução tem chave no baseline.\n");
     return;
   }
   for (const std::string& k : v.sem_baseline) {
     (void)std::printf("  %-44s SEM BASELINE — nada a comparar\n", k.c_str());
+  }
+  if (!v.sem_baseline.empty() || !v.nao_comparadas.empty()) {
+    (void)std::printf(
+        "  As de cima são métricas CONTRATUAIS que o gate NÃO comparou — por falta de número\n"
+        "  no baseline ou por a medição desta execução ter saído ruim. É o código de saída 6,\n"
+        "  e não 0: \"não deu para comparar\" não é aprovação. Fixe o baseline na máquina de\n"
+        "  referência, ou repita a medição numa máquina quieta.\n");
   }
   for (const Comparacao& c : v.comparacoes) {
     (void)std::printf("  %-44s baseline %12.2f  medido %12.2f  %+7.2f%%  %s\n", c.chave.c_str(),

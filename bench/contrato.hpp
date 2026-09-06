@@ -17,10 +17,15 @@
 // vezes nele (o LTO que nunca ligava, o preset `tsan` que selecionava zero testes).
 //
 // Agora a tabela é uma. O C++ a lê dos dois lados; o Python NÃO a copia — ele a recebe pelo bloco
-// `contrato` do próprio JSON de medição, que `saida.cpp` emite desta tabela. Uma verdade, três
-// consumidores, nenhuma cópia.
+// `contrato` do próprio JSON de medição, que `saida.cpp` emite desta tabela.
 //
-// As duas defesas contra o retorno do defeito:
+// Falta um quarto lugar onde as mesmas chaves aparecem, e ele NÃO é gerado: `bench/baseline.json` é
+// versionado e editado à mão. Renomear uma chave só lá reproduz o defeito inteiro — o comparador
+// procura o que não existe, imprime "SEM BASELINE" e, antes, saía 0. Como o arquivo não pode nascer
+// daqui (ele é o alvo, e quem o escreve é `--gravar-baseline` na máquina de referência), ele é
+// CONFERIDO daqui: `divergencias_de_esquema()`, que o CI roda a cada PR.
+//
+// As três defesas contra o retorno do defeito:
 //
 //   1. COMPILAÇÃO. O nome da série é `constexpr` aqui e usado no ponto de registro (`bench_*.cpp`),
 //      então renomear é editar UMA linha e os dois lados a seguem. `esquema_coerente()` confere no
@@ -28,9 +33,12 @@
 //   2. EXECUÇÃO. Quem trocar a constante por um literal no ponto de registro cai em
 //      `contrato_quebrado()`: a suíte rodou, a série contratual não apareceu, e o harness sai com
 //      erro em vez de gravar um JSON com a métrica obrigatória nula.
+//   3. ARQUIVO. `--conferir-esquema` confronta as chaves do baseline versionado com esta tabela e
+//      reprova na divergência, nos dois sentidos (chave que falta, chave que sobra).
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "bench/harness.hpp"
@@ -121,6 +129,9 @@ inline constexpr Metrica kEsquemaMetricas[] = {
 // O que a tabela não pode deixar de ser, conferido pelo compilador. Cada condição existe por um
 // jeito concreto de o JSON sair mentindo.
 [[nodiscard]] constexpr bool esquema_coerente() noexcept {
+  // `all_of` com um predicado de cinco condições explicadas uma a uma fica pior de ler do que o
+  // laço, e isto é código de conferência: quem o lê está atrás das condições, não da forma.
+  // NOLINTNEXTLINE(readability-use-anyofallof)
   for (const Metrica& m : kEsquemaMetricas) {
     if (m.chave == nullptr || m.rotulo == nullptr || m.grupo == nullptr) return false;
     // Ou a métrica tem série que a preenche, ou tem motivo de não ter — nunca as duas, nunca
@@ -141,6 +152,21 @@ static_assert(esquema_coerente(),
               "bench/contrato.hpp: métrica sem série E sem motivo, série sem grupo, quantis sem "
               "subcampos, ou série ligada a uma métrica que escreve_json ainda não sabe emitir");
 
+// ---------------------------------------------------------------------------------------------
+// A CARGA, PELA MESMA REGRA
+//
+// Quais campos definem a carga era outra lista escrita duas vezes: aqui (o comparador confere um
+// por um) e em `scripts/relatorio-bench.py` (que recusa comparar lados de cargas diferentes), com
+// um comentário admitindo que eram "os MESMOS cinco". Mesma forma de defeito da tabela de
+// métricas: acrescentar um campo à carga atualizava um dos dois, e o outro deixava de conferi-lo
+// em silêncio. Agora a lista sai daqui e viaja no bloco `contrato` do JSON.
+//
+// `eventos` fica de fora de propósito: ele é consequência dos outros cinco. Uma mudança no
+// simulador que produza mais eventos para a mesma configuração é a diferença que se QUER medir,
+// não a que invalida a medição.
+[[nodiscard]] std::vector<std::pair<std::string, uint64_t>> campos_da_carga(
+    const DescricaoCarga& carga);
+
 // A série de nome `nome` entre as medidas, ou nullptr.
 [[nodiscard]] const Serie* serie_de(const std::vector<Serie>& series, const char* nome) noexcept;
 
@@ -148,5 +174,19 @@ static_assert(esquema_coerente(),
 // rodou (há séries dela na lista) mas o nome do contrato não apareceu. É o caso do rename que
 // atualiza um lado só — antes desta função ele saía como métrica nula e gate verde.
 [[nodiscard]] std::vector<std::string> contrato_quebrado(const std::vector<Serie>& series);
+
+// As divergências entre as chaves de um arquivo de baseline e as deste esquema: chave contratual
+// que falta no arquivo, e chave `metricas.*` do arquivo que este esquema não conhece.
+//
+// Existe porque `bench/baseline.json` é versionado à mão e era a QUARTA cópia da tabela: renomear
+// a chave só lá fazia o comparador não achar nada e sair 0 — "SEM BASELINE, nada a comparar" —
+// que é o mesmo gate verde sem ter comparado, mudado de lugar. `--conferir-esquema` roda isto no
+// CI, contra o arquivo versionado.
+//
+// `caminhos` é o documento já achatado pelo leitor do comparador ("metricas.a.b"). Métrica de
+// forma `Mapa` não é conferida: um objeto vazio não deixa caminho nenhum no documento achatado, e
+// exigir presença dela seria exigir que alguém escrevesse `{}` com um filho dentro.
+[[nodiscard]] std::vector<std::string> divergencias_de_esquema(
+    const std::vector<std::string>& caminhos);
 
 }  // namespace rv::bench

@@ -108,6 +108,84 @@ void objeto_de_nulos(std::FILE* f, const char* subcampos) {
   return s != nullptr && s->medida && s->estavel;
 }
 
+// O bloco `contrato`: as métricas obrigatórias com o rótulo em português corrente, e os campos
+// que definem a carga. `scripts/relatorio-bench.py` DERIVA daqui as séries que tem de comparar,
+// os rótulos do resumo e os campos de carga que confere — em vez de repetir as duas listas em
+// Python, que foi como a terceira e a quarta cópias da mesma verdade nasceram.
+void escreve_contrato(std::FILE* f, const DescricaoCarga& carga) {
+  (void)std::fputs("  \"contrato\": {\n    \"metricas\": [\n", f);
+  bool primeiro = true;
+  for (const Metrica& m : kEsquemaMetricas) {
+    if (m.serie == nullptr) continue;
+    if (!primeiro) (void)std::fputs(",\n", f);
+    primeiro = false;
+    (void)std::fputs("      { \"chave\": ", f);
+    escapa(f, m.chave);
+    (void)std::fputs(", \"serie\": ", f);
+    escapa(f, m.serie);
+    (void)std::fputs(", \"rotulo\": ", f);
+    escapa(f, m.rotulo);
+    (void)std::fputs(" }", f);
+  }
+  (void)std::fputs("\n    ],\n    \"campos_carga\": [", f);
+  primeiro = true;
+  for (const auto& [nome, valor] : campos_da_carga(carga)) {
+    (void)valor;  // aqui interessa o NOME do campo; o valor já saiu no bloco `carga`
+    if (!primeiro) (void)std::fputs(", ", f);
+    primeiro = false;
+    escapa(f, nome);
+  }
+  (void)std::fputs("]\n  },\n", f);
+}
+
+// O bloco `metricas`, na ordem de `kEsquemaMetricas` — que é a ordem de bench/baseline.json,
+// inclusive as nulas: o comparador casa por chave, e um arquivo de medição com esquema diferente
+// do baseline não compara nada.
+void escreve_metricas(std::FILE* f, const std::vector<Serie>& series) {
+  (void)std::fputs("  \"metricas\": {\n", f);
+  constexpr size_t kNMetricas = std::size(kEsquemaMetricas);
+  for (size_t i = 0; i < kNMetricas; ++i) {
+    const Metrica& m = kEsquemaMetricas[i];
+    (void)std::fputs("    ", f);
+    escapa(f, m.chave);
+    (void)std::fputs(": ", f);
+    switch (m.forma) {
+      case FormaValor::Escalar: {
+        const Serie* s = serie_de(series, m.serie);
+        if (publicavel(s)) {
+          numero(f, s->mediana);
+        } else {
+          (void)std::fputs("null", f);
+        }
+        break;
+      }
+      case FormaValor::Objeto:
+        objeto_de_nulos(f, m.subcampos);
+        break;
+      case FormaValor::Mapa:
+        (void)std::fputs("{}", f);
+        break;
+    }
+    (void)std::fputs(i + 1 < kNMetricas ? ",\n" : "\n", f);
+  }
+  (void)std::fputs("  },\n", f);
+}
+
+void escreve_ausentes(std::FILE* f) {
+  (void)std::fputs("  \"metricas_ausentes\": {\n", f);
+  bool primeiro = true;
+  for (const Metrica& m : kEsquemaMetricas) {
+    if (m.motivo == nullptr) continue;
+    if (!primeiro) (void)std::fputs(",\n", f);
+    primeiro = false;
+    (void)std::fputs("    ", f);
+    escapa(f, m.chave);
+    (void)std::fputs(": ", f);
+    escapa(f, m.motivo);
+  }
+  (void)std::fputs("\n  },\n", f);
+}
+
 }  // namespace
 
 bool escreve_json(const std::string& caminho, const Ambiente& amb, const Config& cfg,
@@ -119,7 +197,11 @@ bool escreve_json(const std::string& caminho, const Ambiente& amb, const Config&
     return false;
   }
 
-  (void)std::fputs("{\n  \"schema\": 1,\n  \"status\": ", f);
+  // schema 2: o documento passou a trazer o bloco `contrato` (as métricas obrigatórias, seus
+  // rótulos e os campos que definem a carga), de onde o relatório em Python tira as séries que TEM
+  // de comparar. Quem lê um documento `"schema": 1` sabe que aquele bloco não existe lá — e o
+  // relatório diz isso em vez de concluir que nada era obrigatório.
+  (void)std::fputs("{\n  \"schema\": 2,\n  \"status\": ", f);
   escapa(f, status);
   (void)std::fprintf(f, ",\n  \"limiar_regressao_pct\": %.0f,\n", 5.0);
 
@@ -158,71 +240,9 @@ bool escreve_json(const std::string& caminho, const Ambiente& amb, const Config&
                      static_cast<unsigned long long>(carga.semente),
                      static_cast<unsigned long long>(carga.eventos));
 
-  // ------------------------------------------------------------------ contrato
-  // Qual série alimenta cada chave do baseline, e o que a chave significa em português corrente.
-  // Vai no arquivo para que `scripts/relatorio-bench.py` DERIVE daqui as séries que têm de ser
-  // comparadas e os rótulos do resumo, em vez de repetir a tabela em Python — que foi como a
-  // terceira cópia da mesma verdade nasceu.
-  (void)std::fputs("  \"contrato\": [\n", f);
-  bool primeiro = true;
-  for (const Metrica& m : kEsquemaMetricas) {
-    if (m.serie == nullptr) continue;
-    if (!primeiro) (void)std::fputs(",\n", f);
-    primeiro = false;
-    (void)std::fputs("    { \"chave\": ", f);
-    escapa(f, m.chave);
-    (void)std::fputs(", \"serie\": ", f);
-    escapa(f, m.serie);
-    (void)std::fputs(", \"rotulo\": ", f);
-    escapa(f, m.rotulo);
-    (void)std::fputs(" }", f);
-  }
-  (void)std::fputs("\n  ],\n", f);
-
-  // ------------------------------------------------------------------ metricas
-  // A ordem e as chaves são as de `kEsquemaMetricas`, que é a ordem de bench/baseline.json,
-  // inclusive as nulas: o comparador casa por chave, e um arquivo de medição com esquema
-  // diferente do baseline não compara nada.
-  (void)std::fputs("  \"metricas\": {\n", f);
-  constexpr size_t kNMetricas = std::size(kEsquemaMetricas);
-  for (size_t i = 0; i < kNMetricas; ++i) {
-    const Metrica& m = kEsquemaMetricas[i];
-    (void)std::fputs("    ", f);
-    escapa(f, m.chave);
-    (void)std::fputs(": ", f);
-    switch (m.forma) {
-      case FormaValor::Escalar: {
-        const Serie* s = serie_de(series, m.serie);
-        if (publicavel(s)) {
-          numero(f, s->mediana);
-        } else {
-          (void)std::fputs("null", f);
-        }
-        break;
-      }
-      case FormaValor::Objeto:
-        objeto_de_nulos(f, m.subcampos);
-        break;
-      case FormaValor::Mapa:
-        (void)std::fputs("{}", f);
-        break;
-    }
-    (void)std::fputs(i + 1 < kNMetricas ? ",\n" : "\n", f);
-  }
-  (void)std::fputs("  },\n", f);
-
-  (void)std::fputs("  \"metricas_ausentes\": {\n", f);
-  primeiro = true;
-  for (const Metrica& m : kEsquemaMetricas) {
-    if (m.motivo == nullptr) continue;
-    if (!primeiro) (void)std::fputs(",\n", f);
-    primeiro = false;
-    (void)std::fputs("    ", f);
-    escapa(f, m.chave);
-    (void)std::fputs(": ", f);
-    escapa(f, m.motivo);
-  }
-  (void)std::fputs("\n  },\n", f);
+  escreve_contrato(f, carga);
+  escreve_metricas(f, series);
+  escreve_ausentes(f);
 
   // ------------------------------------------------------------------ series
   (void)std::fputs("  \"series\": [\n", f);

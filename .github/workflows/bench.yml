@@ -17,10 +17,15 @@
 # O QUE ESTE GATE PEGA, E O QUE ELE NÃO PEGA
 #
 # Ele pega REGRESSÃO GROSSA: um fator, um O(n²) acidental, uma alocação que voltou para o hot
-# path. Não pega 5 %. Não pega porque não dá: medido nesta sessão, o ruído entre execuções
-# idênticas do mesmo binário chega a 10-25 % em algumas séries, e um limiar abaixo disso produz
-# reprovação aleatória. O gate exige que a diferença passe do limiar do projeto E de três vezes o
-# ruído MEDIDO das próprias séries — que ele calcula de três execuções por lado, intercaladas.
+# path. Não pega 5 %. Não pega porque não dá: o ruído entre execuções idênticas do mesmo binário
+# chega a 10-25 % em algumas séries, e um limiar abaixo disso produz reprovação aleatória. O gate
+# exige que a diferença passe do limiar do projeto E de três vezes o ERRO PADRÃO DA MEDIANA das
+# próprias séries — que ele calcula de três execuções por lado, intercaladas.
+#
+# Medido em 5 rodadas nesta máquina (bench/README.md traz a tabela): as duas métricas contratuais
+# fecham 5/5, uma regressão de 2× é pega 5/5, e o PR inocente não reprova 0/5 com Δ de até −19 %.
+# Antes de setembro/2026 esses números eram 0/5 e 0/5 — o portão avisava e não olhava nada, e é
+# por isso que o código 2 do relatório passou de aviso a REPROVAÇÃO.
 #
 # O gate de 5 % existe, mas é outro: `motor-rv-bench --comparar bench/baseline.json`, rodado por
 # `desempenho` na máquina de referência. Os dois são complementares e nenhum substitui o outro.
@@ -79,13 +84,20 @@ jobs:
           for chave in ("schema", "ambiente", "harness", "carga", "contrato", "metricas",
                         "metricas_ausentes", "series"):
               assert chave in d, f"falta '{chave}' no JSON da medição"
+          # schema 2 = o documento traz o bloco `contrato`. O número existe para que quem lê saiba
+          # o que esperar do arquivo; deixá-lo em 1 depois de o CI passar a EXIGIR o bloco faria
+          # "schema 1" designar duas coisas diferentes.
+          assert d["schema"] >= 2, f"schema {d['schema']}: o bloco 'contrato' entrou no schema 2"
           assert d["carga"]["eventos"] > 0, "a carga não foi registrada"
-          # O bloco `contrato` é o que diz ao relatório quais séries ele TEM de comparar. Se ele
-          # sumir, ou apontar para uma série que não existe, o gate volta a olhar para nada — e
-          # sem esta conferência ele faria isso em silêncio, que é o defeito inteiro.
+          # O bloco `contrato` é o que diz ao relatório quais séries ele TEM de comparar e quais
+          # campos definem a carga. Se ele sumir, ou apontar para uma série que não existe, o gate
+          # volta a olhar para nada — e sem esta conferência faria isso em silêncio.
           nomes = {s["nome"] for s in d["series"]}
-          assert d["contrato"], "o bloco 'contrato' veio vazio: o relatório não exigiria série nenhuma"
-          for c in d["contrato"]:
+          assert d["contrato"]["metricas"], "contrato sem métricas: nada seria exigido"
+          assert d["contrato"]["campos_carga"], "contrato sem campos_carga: o relatório não teria o que conferir"
+          for campo in d["contrato"]["campos_carga"]:
+              assert campo in d["carga"], f"campo de carga do contrato ausente no bloco carga: {campo}"
+          for c in d["contrato"]["metricas"]:
               assert c["serie"] in nomes, f"contrato aponta para série inexistente: {c['serie']}"
               assert d["metricas"].get(c["chave"], "ausente") != "ausente", \
                   f"a chave {c['chave']} do contrato não saiu em 'metricas'"
@@ -95,6 +107,20 @@ jobs:
               assert s["medida"] or s["nota"], f"série pulada sem motivo: {s['nome']}"
           print(f"ok: {len(d['series'])} séries, {d['carga']['eventos']} eventos")
           PY
+
+      # `bench/baseline.json` é versionado à mão, e era a QUARTA cópia da tabela de métricas:
+      # renomear uma chave só lá fazia o comparador procurar o que não existe, imprimir
+      # "SEM BASELINE" e sair 0. Este passo confronta as chaves do arquivo com bench/contrato.hpp.
+      - name: o baseline versionado bate com o esquema
+        run: |
+          ./build/release/bench/motor-rv-bench --conferir-esquema bench/baseline.json
+          sed 's/"nucleo.eventos_por_s_por_core"/"nucleo.renomeada_a_mao"/' bench/baseline.json \
+            > "$RUNNER_TEMP/baseline-divergente.json"
+          set +e
+          ./build/release/bench/motor-rv-bench --conferir-esquema "$RUNNER_TEMP/baseline-divergente.json"
+          test $? -ne 0 || { echo "::error::a conferência de esquema aceitou uma chave renomeada"; exit 1; }
+          set -e
+          echo "o esquema do baseline é conferido, e uma chave renomeada reprova"
 
       # O comparador tem de saber dizer NÃO. Dois baselines sintéticos, um que nenhuma máquina
       # reprova e um que nenhuma máquina aprova: o veredito não depende da velocidade do runner.
@@ -116,7 +142,13 @@ jobs:
                        "particoes": 1, "semente": 20260902, "eventos": 0 },
             "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
           FIM
-          comum="--rapido --silencioso --suites nucleo --negocios 2000 --investidores 300"
+          # `--limiar-cv 1000` aceita qualquer dispersão como estável. Não é para maquiar a
+          # medição: este job responde "o comparador funciona?", e a resposta não pode depender de
+          # o runner ter ficado ocupado. Sem isto, uma série instável sai como NÃO COMPARADA
+          # (código 6) e o passo falha por ruído — que é o que aconteceu ao rodar este job cinco
+          # vezes seguidas.
+          comum="--rapido --limiar-cv 1000 --silencioso --suites nucleo
+                 --negocios 2000 --investidores 300"
 
           ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/frouxo.json"
           echo "baseline frouxo: aprovou, como devia"
@@ -126,8 +158,22 @@ jobs:
           test $? -eq 3 || { echo "::error::o comparador NÃO reprovou uma regressão de 1000x"; exit 1; }
           ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/outra-carga.json"
           test $? -eq 4 || { echo "::error::o comparador comparou cargas diferentes"; exit 1; }
+          # Regressão contra um baseline SEM bloco `carga` continua sendo 3. Enquanto os códigos
+          # eram atribuídos em `if`s independentes, o 5 sobrescrevia o 3 e toda regressão medida
+          # contra um baseline antigo virava "não conferi a carga" — com REGRESSÃO no stdout.
+          cat > "$RUNNER_TEMP/apertado-sem-carga.json" <<FIM
+          { "schema": 2, "limiar_regressao_pct": 5,
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000000000.0 } }
+          FIM
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/apertado-sem-carga.json"
+          test $? -eq 3 || { echo "::error::o 5 (carga não conferida) mascarou o 3 (regressão)"; exit 1; }
+
+          # Métrica contratual sem número no baseline: 6, não 0. "Nada a comparar" não é aprovação.
+          ./build/release/bench/motor-rv-bench $comum --comparar bench/baseline.json
+          test $? -eq 6 || { echo "::error::métrica contratual sem baseline não produziu código 6"; exit 1; }
           set -e
-          echo "o comparador reprova regressão (3) e recusa carga diferente (4)"
+          echo "o comparador reprova regressão (3), recusa carga diferente (4), não deixa o 5"\
+               " mascarar o 3, e sai 6 quando a métrica contratual não tem número no baseline"
 
       # Medir com o preset errado é o erro que contamina todos os PRs seguintes, e ele não dá
       # sintoma: o número simplesmente fica menor.
@@ -148,11 +194,12 @@ jobs:
       # para que o resultado não dependa da máquina.
       - name: o gerador de relatório detecta regressão e ignora ruído
         run: |
-          gera() {  # $1 = arquivo, $2 = fator na vazão do núcleo, $3 = "instavel" (opcional)
-            python3 - "$1" "$2" "${3:-estavel}" <<'PY'
+          gera() {  # $1 = arquivo, $2 = fator na vazão, $3 = "instavel"|"", $4 = nome da série
+            python3 - "$1" "$2" "${3:-estavel}" "${4:-nucleo.loop.eventos_por_s_por_core}" <<'PY'
           import json, sys
           fator = float(sys.argv[2])
           estavel = sys.argv[3] != "instavel"
+          serie = sys.argv[4]
           json.dump({
             "schema": 1, "limiar_regressao_pct": 5,
             "ambiente": {"commit": "x", "maquina": "m", "kernel": "k", "flags": "f",
@@ -163,13 +210,16 @@ jobs:
             # O bloco `contrato` é de onde o relatório tira as séries que TEM de comparar (o
             # harness o emite de bench/contrato.hpp). Sem ele aqui, o teste exercitaria um
             # caminho que a produção não usa.
-            "contrato": [{"chave": "nucleo.eventos_por_s_por_core",
-                          "serie": "nucleo.loop.eventos_por_s_por_core",
-                          "rotulo": "Eventos por segundo, por core"}],
+            "contrato": {"metricas": [{"chave": "nucleo.eventos_por_s_por_core",
+                                       "serie": serie,
+                                       "rotulo": "Eventos por segundo, por core"}],
+                         "campos_carga": ["dias", "negocios_por_dia", "investidores",
+                                          "particoes", "semente"]},
             "metricas": {}, "metricas_ausentes": {},
-            "series": [{"nome": "nucleo.loop.eventos_por_s_por_core", "grupo": "nucleo",
+            "series": [{"nome": serie, "grupo": "nucleo",
                         "unidade": "ops/s", "direcao": "maior_melhor", "medida": True,
-                        "estavel": estavel, "mediana": 1000000.0 * fator, "cv_pct": 1.0}],
+                        "estavel": estavel, "mediana": 1000000.0 * fator, "cv_pct": 1.0,
+                        "amostras": [1000000.0 * fator] * 7}],
           }, open(sys.argv[1], "w"))
           PY
           }
@@ -195,17 +245,46 @@ jobs:
             --contra "$RUNNER_TEMP/base.json" --saida /dev/null --exigir serie.que.nao.existe
           test $? -eq 2 || { echo "::error::série exigida ausente não produziu código 2"; exit 1; }
 
-          # O mesmo, mas SEM --exigir: a lista de séries obrigatórias tem de vir do bloco
-          # `contrato` do JSON. Se ela voltasse a ser um default digitado no script, ou se o bloco
-          # sumisse, este caso sairia 0 — um relatório dizendo "sem regressão" sobre uma série que
-          # ninguém comparou.
+          # A lista de séries obrigatórias tem de vir do bloco `contrato` do JSON, e este caso é o
+          # que distingue isso de um default digitado no script: a série se chama OUTRA coisa nos
+          # dois lados, e o contrato aponta para ela. Derivando do contrato, a série é comparada e
+          # o resultado é 0; com o default antigo (`nucleo.loop.eventos_por_s_por_core`) o script
+          # procuraria um nome inexistente e sairia 2. O caso anterior a este — com o mesmo nome
+          # nos dois lados — passava dos dois jeitos e não provava nada.
+          gera "$RUNNER_TEMP/base-outronome.json" 1.00 estavel outro.nome.de.serie
+          gera "$RUNNER_TEMP/pr-outronome.json"   1.00 estavel outro.nome.de.serie
+          set +e
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/pr-outronome.json" \
+            --contra "$RUNNER_TEMP/base-outronome.json" --saida /dev/null
+          test $? -eq 0 || { echo "::error::a lista de exigidas não veio do contrato do JSON"; exit 1; }
+
+          # Série marcada INSTÁVEL pelo harness continua sendo COMPARADA: `estavel` decide se um
+          # número vira baseline, não se dois números podem ser confrontados. Usá-la como porta de
+          # entrada fechava o portão A/B (medido: 0/5 de fechamento) e o job só avisava.
           gera "$RUNNER_TEMP/instavel.json" 1.00 instavel
           python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/instavel.json" \
             --contra "$RUNNER_TEMP/base.json" --saida /dev/null
-          test $? -eq 2 || { echo "::error::série do contrato instável não produziu código 2"; exit 1; }
+          test $? -eq 0 || { echo "::error::série instável ficou de fora da comparação A/B"; exit 1; }
+
+          # E uma regressão de 2× numa série instável tem de ser vista assim mesmo.
+          gera "$RUNNER_TEMP/instavel-ruim.json" 0.50 instavel
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/instavel-ruim.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 1 || { echo "::error::regressão de 2x numa série instável não foi vista"; exit 1; }
+
+          # JSON sem contrato e sem --exigir não pode dar veredito verde: nada seria exigido.
+          python3 - "$RUNNER_TEMP/sem-contrato.json" "$RUNNER_TEMP/base.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[2]))
+          d.pop("contrato")
+          json.dump(d, open(sys.argv[1], "w"))
+          PY
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/sem-contrato.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 2 || { echo "::error::JSON sem contrato deu veredito verde"; exit 1; }
           set -e
-          echo "queda de 50 % reprovada (1), série exigida ausente e série do contrato instável"\
-               " sinalizadas (2), como devia"
+          echo "exigidas vêm do contrato; série instável é comparada; regressão de 2x vista;"\
+               " JSON sem contrato não fica verde"
 
   # --------------------------------------------------------------------------------------------
   # 2. A medição em si, com relatório. Em PR, também compara com a base no MESMO runner.
@@ -312,7 +391,7 @@ jobs:
           # do `cat` — sem as duas, um disco ruim derruba o relatório inteiro.
           if [ -f "$RUNNER_TEMP/med/wal.json" ]; then
             python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/med/wal.json" \
-              --titulo "WAL no disco do runner (informativo, não é gate)" \
+              --apendice --titulo "WAL no disco do runner (informativo, não é gate)" \
               --saida "$RUNNER_TEMP/med/relatorio-wal.md" || true
             if [ -f "$RUNNER_TEMP/med/relatorio-wal.md" ]; then
               cat "$RUNNER_TEMP/med/relatorio-wal.md" >> "$RUNNER_TEMP/med/relatorio.md"
@@ -334,8 +413,13 @@ jobs:
           fi
           case "${{ steps.relatorio.outputs.regressao }}" in
             0) echo "nenhuma regressão acima do ruído" ;;
-            2) echo "::warning::uma série contratual ficou instável e NÃO foi comparada — "\
-                    "veja o resumo do job. O ruído do runner subiu; considere reexecutar." ;;
+            # O 2 REPROVA desde a devolução do verificador. Ele deixou de significar "o runner
+            # estava barulhento" — série instável agora é comparada — e passou a significar que
+            # uma métrica que os DOIS lados têm não foi confrontada. Um gate cego que só avisa é
+            # um gate que se aprende a ignorar, e era o estado deste: 5 em 5 execuções de um PR
+            # inocente saíam com aviso e nenhuma métrica contratual comparada.
+            2) echo "::error::uma métrica contratual não foi comparada — veja o resumo do job"
+               exit 1 ;;
             *) echo "::error::regressão de desempenho acima do ruído — veja o resumo do job"
                exit 1 ;;
           esac

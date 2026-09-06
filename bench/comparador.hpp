@@ -42,6 +42,10 @@ struct Comparacao {
 struct Veredito {
   std::vector<Comparacao> comparacoes;
   std::vector<std::string> sem_baseline;  // métricas que o baseline ainda não fixou
+  // Métricas contratuais que ESTA execução mediu mal (pulada ou instável) e por isso não entraram
+  // na comparação. Elas saíam por um `continue` silencioso: o gate imprimia uma tabela sem a linha
+  // que importa e saía 0. Não comparar não é aprovar.
+  std::vector<std::string> nao_comparadas;
   bool houve_regressao = false;
   bool baseline_vazio = true;
   // Carga diferente da do baseline: NÃO se compara. Ver DescricaoCarga em harness.hpp.

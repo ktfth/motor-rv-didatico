@@ -26,12 +26,23 @@ inteira de o aviso existir.
 | `--out ARQ` | grava o JSON da medição |
 | `--comparar ARQ` | confronta com um baseline; **sai != 0** se houver regressão |
 | `--gravar-baseline ARQ` | fixa o baseline; recusa se a medição não for válida |
+| `--conferir-esquema ARQ` | confere as chaves de um baseline contra `bench/contrato.hpp`; não mede nada |
 
 Códigos de saída de `motor-rv-bench`: **0** ok · **1** erro de execução · **2** uso inválido, recusa
-de gravar baseline, ou série contratual ausente · **3** regressão acima do limiar · **4** a carga do
-baseline é outra e nada foi comparado · **5** comparou sem poder conferir a carga, porque o baseline
-não a declara. O 5 existe porque "as cargas batem" e "não deu para saber se batem" produziam a mesma
-saída, e a segunda era lida como aprovação.
+de gravar baseline, série contratual ausente ou esquema divergente · **3** regressão acima do limiar
+· **4** a carga do baseline é outra e nada foi comparado · **5** comparou sem poder conferir a carga,
+porque o baseline não a declara · **6** métrica contratual não comparada (sem número no baseline, ou
+medida como instável/pulada nesta execução).
+
+A precedência é **3 → 4 → 6 → 5**, e ela é o conserto de um defeito real: enquanto os códigos eram
+atribuídos por `if`s independentes, qualquer baseline sem bloco `carga` — todos os anteriores a esta
+mudança — transformava uma regressão medida em 5, com `REGRESSÃO` impresso no terminal e o
+`bench.yml` conferindo `test $? -eq 3`. Uma regressão medida não é mascarada por uma conferência que
+faltou.
+
+O 5 e o 6 existem pelo mesmo motivo: "as cargas batem" e "não deu para saber" produziam a mesma
+saída; "a métrica não regrediu" e "a métrica não foi comparada" também. Contra o
+`bench/baseline.json` versionado de hoje — que não tem número nenhum — o comando sai **6**, e não 0.
 
 ## O que o harness faz que um `for` com `clock_gettime` não faz
 
@@ -68,7 +79,13 @@ saía **verde** tendo comparado coisa nenhuma. As duas defesas contra a volta di
   apareceu, o harness sai com 2 em vez de gravar um JSON com a métrica obrigatória nula.
 
 O `scripts/relatorio-bench.py` **não copia** a tabela: ele a recebe no bloco `contrato` do próprio
-JSON de medição, e é dali que saem as séries que ele exige comparar e os rótulos do resumo.
+JSON de medição, e é dali que saem as séries que ele exige comparar, os rótulos do resumo e os
+campos que definem a carga.
+
+O quarto lugar onde as mesmas chaves aparecem é `bench/baseline.json`, que é versionado e editado à
+mão — ele não pode nascer da tabela (é o alvo, e quem o escreve de verdade é `--gravar-baseline`),
+então é conferido contra ela por `--conferir-esquema`, nos dois sentidos: chave que falta e chave
+que sobra.
 
 ## As três séries do núcleo, e por que não uma
 
@@ -110,35 +127,65 @@ os dois lados **intercalados, três vezes cada, no mesmo runner** — o único a
 comparação isola a mudança de código do hardware. O relatório vai para o resumo do job e para os
 artefatos.
 
-O que esse gate pega e o que não pega, medido e não suposto: no runner deste projeto o ruído entre
-execuções idênticas do mesmo binário fica entre 3 % e 25 % conforme a série. Por isso a regressão
-só é declarada quando a diferença passa do limiar do projeto **e** de três vezes o ruído que as
-próprias séries mediram. Na prática ele pega **regressão grossa** — um fator, um `O(n²)` acidental,
-uma flag de otimização que caiu. Não pega 5 %, e prometer que pegaria seria construir um gate que
-reprova PR inocente até alguém desligá-lo.
+O que esse gate pega e o que não pega, **medido nesta máquina e não suposto**. O procedimento: 5
+rodadas independentes, cada uma com 3 execuções por lado (`--suites nucleo,snapshot --repeticoes 9`,
+1 pregão, 1500 negócios/dia, 200 investidores), o MESMO binário dos dois lados — um PR inocente. Nas
+mesmas 5 rodadas, uma cópia do lado da cabeça com regressão de 2× injetada (metade da vazão do
+núcleo, dobro da duração do snapshot), escalando todas as amostras para preservar o ruído medido:
+
+| | fechamento (série comparada) | regressão de 2× pega | falso positivo |
+|---|---|---|---|
+| `nucleo.loop.eventos_por_s_por_core` | 5/5 | 5/5 | 0/5 |
+| `snapshot.salva.duracao_ms` | 5/5 | 5/5 | 0/5 |
+
+O limiar exigido ficou entre 9,2 % e 49,1 % conforme a série e a rodada, e os Δ do PR inocente
+chegaram a −19,4 % sem reprovar. Ou seja: o gate pega **regressão grossa** — um fator, um `O(n²)`
+acidental, uma flag de otimização que caiu. Não pega 5 %, e prometer que pegaria seria construir um
+gate que reprova PR inocente até alguém desligá-lo.
+
+Estas duas linhas já foram **0/5 e 0/5** — o portão não fechava e não pegava nada, e o job só
+avisava. As duas causas, e as duas correções, estão na seção "A regra de ruído" de
+`scripts/relatorio-bench.py`: o filtro de estabilidade do baseline usado como pré-condição da
+comparação, e a dispersão usada onde cabia o erro padrão da mediana. Com o gate fechando, o código 2
+("não deu para olhar") passou a **reprovar** o job: um gate cego que avisa é um gate que se aprende
+a ignorar.
 
 Quem pega 5 % é o outro gate: `motor-rv-bench --comparar bench/baseline.json`, rodado por
 `desempenho` na máquina de referência, onde o baseline vale (ADR-0022).
 
 O relatório abre por um **Resumo**: passou ou não, e as métricas contratuais em uma tabela com
 rótulo em português corrente — é o que o resumo do job do GitHub mostra primeiro. O ambiente, as 24
-séries e as métricas ainda não medidas continuam abaixo, inteiros.
+séries e as métricas ainda não medidas continuam abaixo, inteiros. `--apendice` gera o documento sem
+resumo e com o título em nível 2, para o relatório informativo do WAL, que é concatenado embaixo do
+principal: dois "## Resumo" no mesmo resumo de job davam dois vereditos, e o de baixo listava como
+"não medida" métricas que aquela execução nem tenta medir.
 
-As séries que ele EXIGE comparar vêm do bloco `contrato` do JSON (`--exigir` só sobrepõe). JSON
-antigo, sem esse bloco, não some em silêncio: o resumo diz que não dá para saber quais séries são
-obrigatórias.
+As séries que ele EXIGE comparar vêm do bloco `contrato` do JSON (`--exigir` só sobrepõe). JSON sem
+esse bloco não fica verde: sem contrato não há o que exigir, e um veredito "sem regressão" com zero
+métricas obrigatórias conferidas é o gate falhando ABERTO.
 
-Códigos de saída de `relatorio-bench.py`: **0** sem regressão, **1** regressão (o job falha),
-**2** uma série contratual não pôde ser comparada por instabilidade (o job avisa e não falha —
-"está mais lento" e "não deu para olhar" são fatos diferentes).
+Códigos de saída de `relatorio-bench.py`: **0** sem regressão, **1** regressão, **2** não deu para
+olhar — uma série obrigatória que existe nos DOIS lados não foi comparada, o JSON não declara
+contrato, ou as duas cargas são diferentes. **O job falha em 1 e em 2.** O 2 já foi só aviso, e o
+motivo de não ser mais está medido na seção abaixo.
+
+Série que a base não tem (uma métrica nova introduzida pelo PR) não cai no 2: não há cegueira, há
+primeira medição. Ela aparece no resumo e não reprova.
 
 ## O baseline versionado e o esquema
 
-`bench/baseline.json` traz os MESMOS blocos que uma medição gerada — `ambiente`, `harness`, `carga`,
-`metricas` — hoje todos nulos, porque o baseline ainda não foi fixado (ver `status` no arquivo). Os
-blocos vazios não são enfeite: sem `carga` declarada, o comparador não tem contra o que conferir a
-carga desta execução, e é exatamente isso que ele passa a dizer (código 5). Um baseline de verdade
-nunca é escrito à mão — sai de `--gravar-baseline`, que preenche os quatro blocos.
+`bench/baseline.json` traz os quatro blocos que um baseline precisa ter — `ambiente`, `harness`,
+`carga` e `metricas` — hoje todos nulos, porque o baseline ainda não foi fixado (ver `status` no
+arquivo). Ele NÃO traz os blocos que só uma medição tem (`contrato`, `metricas_ausentes`, `series`):
+um baseline é um alvo, não um relatório. Os blocos nulos não são enfeite: sem `carga` declarada, o
+comparador não tem contra o que conferir a carga desta execução, e é isso que ele diz.
+
+Um baseline de verdade nunca é escrito à mão — sai de `--gravar-baseline`. Mas o arquivo versionado
+é editado à mão, e por isso ele era a QUARTA cópia da tabela de métricas: renomear uma chave só ali
+fazia o comparador procurar o que não existe, imprimir `SEM BASELINE` e sair 0. `--conferir-esquema`
+confronta as chaves do arquivo com `bench/contrato.hpp` e reprova na divergência; o CI o roda a cada
+PR, inclusive contra uma cópia com a chave propositalmente renomeada, para provar que a conferência
+morde.
 
 ## Rodar o relatório à mão
 
