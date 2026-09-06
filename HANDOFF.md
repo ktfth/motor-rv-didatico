@@ -16,9 +16,15 @@ Sete presets de build configuram, compilam e passam os testes:
 | `asan` / `tsan` / `fuzz` | sanitizers e libFuzzer |
 | `nativo` | `-march=native`, só para experimento |
 
-O CI (`.github/workflows/ci.yml`) roda oito jobs a cada push: a matriz de presets, os gates do
-projeto, o harness de medição (que roda, confere o esquema do JSON e prova que o comparador
-reprova regressão e recusa carga diferente) e o clang-tidy.
+O CI tem **dois workflows**, porque correção e desempenho falham por motivos diferentes e em
+ritmos diferentes — misturá-los faz um teste quebrado e um benchmark barulhento aparecerem como a
+mesma coisa vermelha:
+
+- `.github/workflows/ci.yml` — matriz de presets, os gates do projeto e o clang-tidy.
+- `.github/workflows/bench.yml` — medição. O job `verificacao` prova que o harness e o comparador
+  funcionam (veredito determinístico, sem depender da velocidade do runner); o job `medicao`
+  compila as DUAS árvores de um PR e mede os dois lados intercalados, três vezes cada, no mesmo
+  runner, publicando o relatório no resumo do job e nos artefatos.
 
 ```sh
 ./scripts/bootstrap-toolchain.sh && export PATH="$PWD/.toolchain/bin:$PATH"
@@ -44,6 +50,7 @@ imagem de recuperação. Mesma semente, mesmo resultado.
 | `src/app/` | `motor-rv-sim` |
 | `src/wal/` | **parcial**: formato (`WalHdr` 32 B, `SegmentHdr`), descoberta de alinhamento via `statx` com fallback, três backends de I/O (io_uring, pwrite, injeção de falhas) |
 | `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes |
+| `scripts/relatorio-bench.py` | relatório Markdown da medição e, com dois lados, o veredito de regressão do workflow `bench` — com limiar auto-calibrado pelo ruído medido |
 
 ### Testes — 6 suítes, 13/13 invariantes
 

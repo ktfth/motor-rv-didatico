@@ -169,6 +169,32 @@ referência, com cores pinados, isso deve encolher; se não encolher, o limiar d
 `bench/baseline.json` precisa ser reconsiderado com número na mão, por ADR — não afrouxado no
 susto do primeiro PR reprovado.
 
+## 5b. O gate de CI que saiu daqui (06/09, adendo)
+
+O §5 acima diz que o descarte por CV não pega desvio sistemático e que 5 % é da ordem do ruído
+desta máquina. As duas coisas viraram desenho em `.github/workflows/bench.yml`:
+
+- **Comparação A/B no mesmo runner**, não contra `bench/baseline.json`. Um runner do GitHub tem
+  outra CPU e outro disco; comparado com o baseline da máquina de referência, todo PR reprovaria
+  por hardware. O workflow compila as duas árvores e mede os dois lados **intercalados, três vezes
+  cada** — intercalar controla a deriva da máquina, e três execuções são de onde sai a estimativa
+  de ruído ENTRE execuções.
+- **Limiar auto-calibrado.** A regressão exige passar do limiar do projeto E de 3× o ruído medido,
+  onde ruído = dispersão dentro de uma execução ⊕ dispersão entre execuções. A segunda parcela não
+  estava na primeira versão do script, e a consequência apareceu no primeiro teste: uma série de
+  snapshot com 3,8 % de CV interno andou **23 % entre duas execuções idênticas** e foi reportada
+  como regressão. Com três execuções e o ruído completo, o falso positivo sumiu.
+- **O que o gate pega, medido:** com o ruído observado (3 % a 25 % conforme a série), o limiar
+  efetivo fica entre 8 % e 40 %. Testado ponta a ponta injetando `#pragma GCC optimize("O0")` em
+  `src/core/apply.cpp`: `nucleo.apply.eventos_por_s` caiu 50,69 %, a latência subiu 76,12 %, o
+  relatório marcou REGRESSÃO e o job saiu 1. Uma regressão pequena de verdade — `kBatch` de 256
+  para 1, que custou 3,2 % — passa, e passa de propósito: prometer 5 % num runner compartilhado
+  seria construir um gate que reprova PR inocente até alguém desligá-lo.
+- **Série contratual que sai da comparação vira aviso, não silêncio.** No mesmo teste,
+  `nucleo.loop.eventos_por_s_por_core` ficou instável de um lado e caiu no rodapé de "não
+  comparadas" — e o relatório dizia "nenhuma regressão" sobre a métrica que mais importa, que ele
+  não tinha olhado. Agora `--exigir` sai com código 2 e o job avisa.
+
 ## 6. O que ficou de fora, e por quê
 
 `bench/baseline.json` continua com cinco métricas `null`. O JSON de medição traz o motivo de cada
@@ -191,3 +217,6 @@ uma em `metricas_ausentes`:
    já está no harness: as duas séries têm de convergir.
 3. **`wal.append_para_duravel_us` quando o escritor existir.** O harness já tem o histograma, o
    descarte de série e o bloco de ambiente; falta o objeto a medir.
+4. **Reavaliar o limiar do gate de CI** depois de algumas dezenas de execuções reais: os números
+   de §5b vêm de um contêiner, e o ruído de um runner do GitHub pode ser outro. O lugar de mudar é
+   `--sigmas` no workflow, com o histórico das execuções na mão.

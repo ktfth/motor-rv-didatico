@@ -1,0 +1,315 @@
+# Medição do motor-rv como passo de verificação.
+#
+# ---------------------------------------------------------------------------------------------
+# POR QUE ESTE WORKFLOW NÃO COMPARA COM `bench/baseline.json`
+#
+# `bench/baseline.json` é fixado na máquina de referência (docs/ambiente.md, ADR-0022) e só vale
+# lá. Um runner do GitHub tem outra CPU, outro disco e vizinhos barulhentos: comparado com aquele
+# baseline, todo PR reprovaria por diferença de hardware. Um gate que reprova por motivo errado é
+# desligado com raiva em três meses, e junto com ele vai o gate que funcionava.
+#
+# O que dá para verificar num runner compartilhado é OUTRA pergunta, e ela é a que interessa num
+# PR: "este código está mais lento que a base?". A resposta vem de medir OS DOIS LADOS NA MESMA
+# EXECUÇÃO, no mesmo runner, minutos um do outro — o único arranjo em que a comparação isola a
+# mudança de código do hardware.
+#
+# ---------------------------------------------------------------------------------------------
+# O QUE ESTE GATE PEGA, E O QUE ELE NÃO PEGA
+#
+# Ele pega REGRESSÃO GROSSA: um fator, um O(n²) acidental, uma alocação que voltou para o hot
+# path. Não pega 5 %. Não pega porque não dá: medido nesta sessão, o ruído entre execuções
+# idênticas do mesmo binário chega a 10-25 % em algumas séries, e um limiar abaixo disso produz
+# reprovação aleatória. O gate exige que a diferença passe do limiar do projeto E de três vezes o
+# ruído MEDIDO das próprias séries — que ele calcula de três execuções por lado, intercaladas.
+#
+# O gate de 5 % existe, mas é outro: `motor-rv-bench --comparar bench/baseline.json`, rodado por
+# `desempenho` na máquina de referência. Os dois são complementares e nenhum substitui o outro.
+
+name: bench
+
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      negocios:
+        description: "negócios por pregão"
+        default: "5000"
+      investidores:
+        description: "investidores"
+        default: "500"
+      dias:
+        description: "pregões"
+        default: "1"
+      repeticoes:
+        description: "repetições por série"
+        default: "9"
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEPS: >-
+    ninja-build cmake liburing-dev libssl-dev libfmt-dev libzstd-dev
+    libgtest-dev libgmock-dev python3
+
+jobs:
+  # --------------------------------------------------------------------------------------------
+  # 1. O harness funciona? Nada aqui depende de quão rápido é o runner — são verificações de
+  #    COMPORTAMENTO, com veredito determinístico.
+  verificacao:
+    name: o harness e o comparador funcionam
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: dependências
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends $DEPS
+      - run: cmake --preset release && cmake --build --preset release
+
+      - name: o harness roda e produz o JSON no esquema certo
+        run: |
+          ./build/release/bench/motor-rv-bench --rapido --silencioso \
+            --negocios 2000 --investidores 300 --dir-wal "$RUNNER_TEMP" \
+            --out "$RUNNER_TEMP/medicao.json"
+          python3 - "$RUNNER_TEMP/medicao.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          for chave in ("schema", "ambiente", "harness", "carga", "metricas",
+                        "metricas_ausentes", "series"):
+              assert chave in d, f"falta '{chave}' no JSON da medição"
+          assert d["carga"]["eventos"] > 0, "a carga não foi registrada"
+          assert len(d["series"]) >= 15, f"séries de menos: {len(d['series'])}"
+          # Série pulada sem motivo é relatório mentindo por omissão.
+          for s in d["series"]:
+              assert s["medida"] or s["nota"], f"série pulada sem motivo: {s['nome']}"
+          print(f"ok: {len(d['series'])} séries, {d['carga']['eventos']} eventos")
+          PY
+
+      # O comparador tem de saber dizer NÃO. Dois baselines sintéticos, um que nenhuma máquina
+      # reprova e um que nenhuma máquina aprova: o veredito não depende da velocidade do runner.
+      - name: o comparador reprova regressão e recusa carga diferente
+        run: |
+          carga='"carga": { "dias": 1, "negocios_por_dia": 2000, "investidores": 300,
+                            "particoes": 1, "semente": 20260902, "eventos": 0 },'
+          cat > "$RUNNER_TEMP/frouxo.json" <<FIM
+          { "schema": 1, "limiar_regressao_pct": 5, $carga
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
+          FIM
+          cat > "$RUNNER_TEMP/apertado.json" <<FIM
+          { "schema": 1, "limiar_regressao_pct": 5, $carga
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000000000.0 } }
+          FIM
+          cat > "$RUNNER_TEMP/outra-carga.json" <<FIM
+          { "schema": 1, "limiar_regressao_pct": 5,
+            "carga": { "dias": 99, "negocios_por_dia": 2000, "investidores": 300,
+                       "particoes": 1, "semente": 20260902, "eventos": 0 },
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
+          FIM
+          comum="--rapido --silencioso --suites nucleo --negocios 2000 --investidores 300"
+
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/frouxo.json"
+          echo "baseline frouxo: aprovou, como devia"
+
+          set +e
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/apertado.json"
+          test $? -eq 3 || { echo "::error::o comparador NÃO reprovou uma regressão de 1000x"; exit 1; }
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/outra-carga.json"
+          test $? -eq 4 || { echo "::error::o comparador comparou cargas diferentes"; exit 1; }
+          set -e
+          echo "o comparador reprova regressão (3) e recusa carga diferente (4)"
+
+      # Medir com o preset errado é o erro que contamina todos os PRs seguintes, e ele não dá
+      # sintoma: o número simplesmente fica menor.
+      - name: o harness recusa gravar baseline fora do release
+        run: |
+          cmake --preset debug && cmake --build --preset debug
+          set +e
+          ./build/debug/bench/motor-rv-bench --rapido --silencioso --suites nucleo \
+            --negocios 500 --investidores 100 \
+            --gravar-baseline "$RUNNER_TEMP/nao-deve-existir.json"
+          test $? -ne 0 || { echo "::error::o harness gravou baseline a partir do preset debug"; exit 1; }
+          set -e
+          test ! -f "$RUNNER_TEMP/nao-deve-existir.json" \
+            || { echo "::error::o arquivo foi criado apesar da recusa"; exit 1; }
+
+      # O gerador de relatório é código de gate: ele decide se um PR passa. Código de gate que
+      # ninguém executa apodrece igual a qualquer outro, e este é testado contra dados sintéticos
+      # para que o resultado não dependa da máquina.
+      - name: o gerador de relatório detecta regressão e ignora ruído
+        run: |
+          gera() {  # $1 = arquivo, $2 = fator aplicado à vazão do núcleo
+            python3 - "$1" "$2" <<'PY'
+          import json, sys
+          fator = float(sys.argv[2])
+          json.dump({
+            "schema": 1, "limiar_regressao_pct": 5,
+            "ambiente": {"commit": "x", "maquina": "m", "kernel": "k", "flags": "f",
+                         "dispositivo_wal": "d", "valido_para_baseline": True},
+            "harness": {"aquecimento": 2, "repeticoes": 7, "limiar_cv_pct": 5.0, "tentativas": 3},
+            "carga": {"dias": 1, "negocios_por_dia": 1, "investidores": 1, "particoes": 1,
+                      "semente": 1, "eventos": 1},
+            "metricas": {}, "metricas_ausentes": {},
+            "series": [{"nome": "nucleo.loop.eventos_por_s_por_core", "grupo": "nucleo",
+                        "unidade": "ops/s", "direcao": "maior_melhor", "medida": True,
+                        "estavel": True, "mediana": 1000000.0 * fator, "cv_pct": 1.0}],
+          }, open(sys.argv[1], "w"))
+          PY
+          }
+          gera "$RUNNER_TEMP/base.json" 1.00
+          gera "$RUNNER_TEMP/igual.json" 1.00
+          gera "$RUNNER_TEMP/ruido.json" 0.97   # 3 %: dentro do limiar, não é regressão
+          gera "$RUNNER_TEMP/ruim.json"  0.50   # metade: é
+
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/igual.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruido.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          echo "3 % não é regressão, como devia"
+
+          set +e
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruim.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 1 || { echo "::error::o relatório não reprovou uma queda de 50%"; exit 1; }
+
+          # Uma série contratual que não pôde ser comparada tem de sair como 2 — nem 0 (passou
+          # calado sobre a métrica que mais importa) nem 1 (não houve regressão; houve cegueira).
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/igual.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null --exigir serie.que.nao.existe
+          test $? -eq 2 || { echo "::error::série exigida ausente não produziu código 2"; exit 1; }
+          set -e
+          echo "queda de 50 % reprovada (1) e série exigida ausente sinalizada (2), como devia"
+
+  # --------------------------------------------------------------------------------------------
+  # 2. A medição em si, com relatório. Em PR, também compara com a base no MESMO runner.
+  medicao:
+    name: medição e relatório
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cabeca
+
+      # A base entra como segunda cópia da árvore. Só em PR: num push não existe "o outro lado".
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: dependências
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends $DEPS
+
+      - name: compilar os dois lados
+        id: compila
+        run: |
+          cmake --preset release -S cabeca -B cabeca/build/release > /dev/null
+          cmake --build cabeca/build/release --target motor-rv-bench
+          echo "comparavel=nao" >> "$GITHUB_OUTPUT"
+
+          test -f base/bench/CMakeLists.txt || {
+            echo "::notice::a base não tem bench/ — só a medição deste commit será publicada"
+            exit 0
+          }
+          # A carga é gerada dos CSVs de data/. Se os dois lados tiverem calendários ou tabelas de
+          # instrumentos diferentes, os dois lados medem sessões diferentes e a comparação não
+          # significa nada — é o mesmo motivo pelo qual o comparador recusa cargas diferentes.
+          diff -r cabeca/data base/data > /dev/null || {
+            echo "::warning::data/ difere entre a base e este PR — comparação desligada"
+            exit 0
+          }
+          cmake --preset release -S base -B base/build/release > /dev/null
+          cmake --build base/build/release --target motor-rv-bench
+          echo "comparavel=sim" >> "$GITHUB_OUTPUT"
+
+      # Três execuções por lado, INTERCALADAS. Intercalar controla a deriva do runner: se a
+      # máquina fica lenta no meio, ela fica lenta para os dois. Três, e não uma, porque é de
+      # onde sai a estimativa de ruído ENTRE execuções — que é a maior das duas e a que decide
+      # o limiar de cada série.
+      - name: medir
+        env:
+          NEGOCIOS: ${{ github.event.inputs.negocios || '5000' }}
+          INVESTIDORES: ${{ github.event.inputs.investidores || '500' }}
+          DIAS: ${{ github.event.inputs.dias || '1' }}
+          REPETICOES: ${{ github.event.inputs.repeticoes || '9' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/med"
+          # A suíte `wal` fica de fora da comparação: o disco de um runner compartilhado não é
+          # comparável consigo mesmo entre duas execuções, e uma série que oscila 10x arrasta o
+          # relatório inteiro. Ela é medida no passo seguinte, como informação, não como gate.
+          comum="--silencioso --suites base,nucleo,snapshot --repeticoes $REPETICOES
+                 --dias $DIAS --negocios $NEGOCIOS --investidores $INVESTIDORES"
+          # Cada lado roda COM O CWD NA SUA PRÓPRIA ÁRVORE. Não é detalhe: o harness identifica o
+          # commit com `git rev-parse HEAD` no diretório corrente, e rodando da raiz do workspace
+          # — que não é repositório nenhum — os dois JSONs saíam com `commit: desconhecido`. Um
+          # relatório de comparação que não diz o que comparou não serve para nada.
+          for i in 1 2 3; do
+            ( cd cabeca && ./build/release/bench/motor-rv-bench $comum \
+                --out "$RUNNER_TEMP/med/cabeca$i.json" )
+            if [ "${{ steps.compila.outputs.comparavel }}" = "sim" ]; then
+              ( cd base && ./build/release/bench/motor-rv-bench $comum \
+                  --out "$RUNNER_TEMP/med/base$i.json" )
+            fi
+          done
+
+      # O WAL contra o disco do runner: informação, nunca gate. Vai para o relatório porque a
+      # forma da curva (4 KiB vs 64 KiB vs 256 KiB) é o que sustenta a hipótese do group commit,
+      # e ela aparece mesmo num disco ruim.
+      - name: medir o WAL (informativo)
+        continue-on-error: true
+        run: |
+          cd cabeca && ./build/release/bench/motor-rv-bench --silencioso --suites wal \
+            --repeticoes 7 --dir-wal "$RUNNER_TEMP" --out "$RUNNER_TEMP/med/wal.json"
+
+      - name: gerar o relatório
+        id: relatorio
+        run: |
+          cd cabeca
+          args="--medicao $RUNNER_TEMP/med/cabeca1.json $RUNNER_TEMP/med/cabeca2.json $RUNNER_TEMP/med/cabeca3.json"
+          if [ "${{ steps.compila.outputs.comparavel }}" = "sim" ]; then
+            args="$args --contra $RUNNER_TEMP/med/base1.json $RUNNER_TEMP/med/base2.json $RUNNER_TEMP/med/base3.json"
+            titulo="Medição — ${{ github.sha }} contra a base"
+          else
+            titulo="Medição — ${{ github.sha }}"
+          fi
+          # 0 = sem regressão; 1 = regressão; 2 = uma série contratual não pôde ser comparada
+          # (ficou instável de algum lado). O 2 não reprova — mas também não passa calado.
+          set +e
+          python3 scripts/relatorio-bench.py $args --titulo "$titulo" \
+            --saida "$RUNNER_TEMP/med/relatorio.md"
+          echo "regressao=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+          # A suíte de WAL pode ter falhado (o passo é `continue-on-error`): o relatório principal
+          # não pode depender dela. `|| true` no python E a existência do arquivo conferida antes
+          # do `cat` — sem as duas, um disco ruim derruba o relatório inteiro.
+          if [ -f "$RUNNER_TEMP/med/wal.json" ]; then
+            python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/med/wal.json" \
+              --titulo "WAL no disco do runner (informativo, não é gate)" \
+              --saida "$RUNNER_TEMP/med/relatorio-wal.md" || true
+            if [ -f "$RUNNER_TEMP/med/relatorio-wal.md" ]; then
+              cat "$RUNNER_TEMP/med/relatorio-wal.md" >> "$RUNNER_TEMP/med/relatorio.md"
+            fi
+          fi
+          cat "$RUNNER_TEMP/med/relatorio.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: medicao-${{ github.run_id }}
+          path: ${{ runner.temp }}/med/
+          retention-days: 30
+
+      - name: veredito
+        run: |
+          if [ "${{ steps.compila.outputs.comparavel }}" != "sim" ]; then
+            echo "sem base comparável: relatório publicado, sem veredito de regressão"
+            exit 0
+          fi
+          case "${{ steps.relatorio.outputs.regressao }}" in
+            0) echo "nenhuma regressão acima do ruído" ;;
+            2) echo "::warning::uma série contratual ficou instável e NÃO foi comparada — "\
+                    "veja o resumo do job. O ruído do runner subiu; considere reexecutar." ;;
+            *) echo "::error::regressão de desempenho acima do ruído — veja o resumo do job"
+               exit 1 ;;
+          esac

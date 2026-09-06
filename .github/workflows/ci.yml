@@ -4,6 +4,11 @@
 # comando. Um gate que ninguém roda não é gate — e uma revisão independente mostrou dois que
 # reportavam VERDE sem ter feito nada (LTO nunca ligava; o preset tsan selecionava zero testes).
 # Por isso o CI não só roda: ele confere que os gates fizeram alguma coisa.
+#
+# A MEDIÇÃO não mora aqui: ela tem workflow próprio (`.github/workflows/bench.yml`), porque roda
+# duas árvores, publica relatório e tem regra de veredito própria. Correção e desempenho falham
+# por motivos diferentes e em ritmos diferentes; misturá-los faria um teste quebrado e um
+# benchmark barulhento aparecerem como a mesma coisa vermelha.
 
 name: ci
 
@@ -159,94 +164,6 @@ jobs:
           echo "negócios abertos: 4 dias = $a | 16 dias = $b"
           test "$b" -lt $((a * 2)) \
             || { echo "::error::a tabela de negócios cresce com o número de dias"; exit 1; }
-
-  bench:
-    name: harness de medição
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: dependências
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build cmake liburing-dev libssl-dev libfmt-dev libzstd-dev \
-            libgtest-dev libgmock-dev python3
-      - run: cmake --preset release && cmake --build --preset release
-
-      # O que este job NÃO faz: comparar com bench/baseline.json.
-      #
-      # Um runner do GitHub não é a máquina de referência (ADR-0022), e um baseline fixado lá
-      # reprovaria todo PR aqui por diferença de hardware. Um gate que reprova por motivo errado é
-      # desligado com raiva em três meses, e junto com ele vai o gate que funcionava. A comparação
-      # com o baseline é rodada por `desempenho` na máquina de referência.
-      #
-      # O que ele faz: garantir que o harness RODA, que produz o JSON no esquema certo e que o
-      # comparador ainda sabe reprovar. Código de gate que ninguém executa apodrece igual a
-      # qualquer outro.
-      - name: o harness roda e produz o JSON
-        run: |
-          ./build/release/bench/motor-rv-bench --rapido --silencioso \
-            --negocios 2000 --investidores 300 --dir-wal "$RUNNER_TEMP" \
-            --out "$RUNNER_TEMP/medicao.json"
-          python3 - "$RUNNER_TEMP/medicao.json" <<'PY'
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          for chave in ("schema", "ambiente", "harness", "carga", "metricas",
-                        "metricas_ausentes", "series"):
-              assert chave in d, f"falta '{chave}' no JSON da medição"
-          assert d["carga"]["eventos"] > 0, "a carga não foi registrada"
-          assert len(d["series"]) >= 15, f"séries de menos: {len(d['series'])}"
-          for s in d["series"]:
-              assert s["medida"] or s["nota"], f"série pulada sem motivo: {s['nome']}"
-          print(f"ok: {len(d['series'])} séries, {d['carga']['eventos']} eventos")
-          PY
-
-      # O comparador tem de saber dizer NÃO. Dois baselines sintéticos, um que nenhuma máquina
-      # reprova e um que nenhuma máquina aprova: o veredito não depende de quão rápido é o runner.
-      - name: o comparador reprova regressão e recusa carga diferente
-        run: |
-          carga='"carga": { "dias": 1, "negocios_por_dia": 2000, "investidores": 300,
-                            "particoes": 1, "semente": 20260902, "eventos": 0 },'
-          cat > "$RUNNER_TEMP/frouxo.json" <<FIM
-          { "schema": 1, "limiar_regressao_pct": 5, $carga
-            "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
-          FIM
-          cat > "$RUNNER_TEMP/apertado.json" <<FIM
-          { "schema": 1, "limiar_regressao_pct": 5, $carga
-            "metricas": { "nucleo.eventos_por_s_por_core": 1000000000.0 } }
-          FIM
-          cat > "$RUNNER_TEMP/outra-carga.json" <<FIM
-          { "schema": 1, "limiar_regressao_pct": 5,
-            "carga": { "dias": 99, "negocios_por_dia": 2000, "investidores": 300,
-                       "particoes": 1, "semente": 20260902, "eventos": 0 },
-            "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
-          FIM
-          comum="--rapido --silencioso --suites nucleo --negocios 2000 --investidores 300"
-
-          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/frouxo.json"
-          echo "baseline frouxo: aprovou, como devia"
-
-          set +e
-          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/apertado.json"
-          test $? -eq 3 || { echo "::error::o comparador NÃO reprovou uma regressão de 1000x"; exit 1; }
-          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/outra-carga.json"
-          test $? -eq 4 || { echo "::error::o comparador comparou cargas diferentes"; exit 1; }
-          set -e
-          echo "o comparador reprova regressão (3) e recusa carga diferente (4)"
-
-      # Medir com o preset errado é o erro que contamina todos os PRs seguintes, e ele não dá
-      # sintoma: o número simplesmente fica menor. O harness tem de RECUSAR.
-      - name: o harness recusa gravar baseline fora do release
-        run: |
-          cmake --preset debug && cmake --build --preset debug
-          set +e
-          ./build/debug/bench/motor-rv-bench --rapido --silencioso --suites nucleo \
-            --negocios 500 --investidores 100 \
-            --gravar-baseline "$RUNNER_TEMP/nao-deve-existir.json"
-          test $? -ne 0 || { echo "::error::o harness gravou baseline a partir do preset debug"; exit 1; }
-          set -e
-          test ! -f "$RUNNER_TEMP/nao-deve-existir.json" \
-            || { echo "::error::o arquivo foi criado apesar da recusa"; exit 1; }
 
   tidy:
     name: clang-tidy

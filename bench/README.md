@@ -70,6 +70,45 @@ dispositivo — uma escrita alinhada, submetida e colhida, com `O_DIRECT|O_DSYNC
 filesystem aceita (a `nota` da série diz quando não aceitou). Nenhum group commit pode ficar
 abaixo disso, e é contra isso que ele será julgado quando existir.
 
+## No CI: dois gates diferentes, e nenhum substitui o outro
+
+`.github/workflows/bench.yml` tem dois jobs.
+
+**`verificacao`** responde "o harness funciona?". Nada ali depende de quão rápido é o runner: o
+harness roda e o JSON é conferido campo a campo; o comparador é confrontado com baselines
+sintéticos e tem de sair 3 (regressão) e 4 (carga diferente); o `--gravar-baseline` tem de recusar
+o preset `debug`; e `scripts/relatorio-bench.py` tem de aprovar 3 % e reprovar 50 %. Veredito
+determinístico em qualquer máquina.
+
+**`medicao`** responde "este PR está mais lento que a base?". Ele compila as DUAS árvores e mede
+os dois lados **intercalados, três vezes cada, no mesmo runner** — o único arranjo em que a
+comparação isola a mudança de código do hardware. O relatório vai para o resumo do job e para os
+artefatos.
+
+O que esse gate pega e o que não pega, medido e não suposto: no runner deste projeto o ruído entre
+execuções idênticas do mesmo binário fica entre 3 % e 25 % conforme a série. Por isso a regressão
+só é declarada quando a diferença passa do limiar do projeto **e** de três vezes o ruído que as
+próprias séries mediram. Na prática ele pega **regressão grossa** — um fator, um `O(n²)` acidental,
+uma flag de otimização que caiu. Não pega 5 %, e prometer que pegaria seria construir um gate que
+reprova PR inocente até alguém desligá-lo.
+
+Quem pega 5 % é o outro gate: `motor-rv-bench --comparar bench/baseline.json`, rodado por
+`desempenho` na máquina de referência, onde o baseline vale (ADR-0022).
+
+Códigos de saída de `relatorio-bench.py`: **0** sem regressão, **1** regressão (o job falha),
+**2** uma série contratual não pôde ser comparada por instabilidade (o job avisa e não falha —
+"está mais lento" e "não deu para olhar" são fatos diferentes).
+
+## Rodar o relatório à mão
+
+```sh
+./build/release/bench/motor-rv-bench --repeticoes 15 --out /tmp/m1.json
+python3 scripts/relatorio-bench.py --medicao /tmp/m1.json --saida /tmp/relatorio.md
+# comparando dois lados (várias execuções por lado melhoram a estimativa de ruído):
+python3 scripts/relatorio-bench.py --medicao /tmp/h1.json /tmp/h2.json /tmp/h3.json \
+                                   --contra  /tmp/b1.json /tmp/b2.json /tmp/b3.json
+```
+
 ## Relatórios
 
 `bench/reports/AAAA-MM-DD-tema.md`, escritos por `desempenho`; notas de revisão, por `verificador`.
