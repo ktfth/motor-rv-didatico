@@ -1,7 +1,8 @@
 # HANDOFF — motor-rv
 
-Estado em **03/09/2026**. Este arquivo substitui o pacote de transferência original (o desenho
-sem código), que está preservado em `../raw/`.
+Estado em **06/09/2026** (o corpo é de 03/09; a medição inicial e o harness de bench entraram em
+06/09). Este arquivo substitui o pacote de transferência original (o desenho sem código), que está
+preservado em `../raw/`.
 
 ## O que existe e funciona
 
@@ -15,14 +16,16 @@ Sete presets de build configuram, compilam e passam os testes:
 | `asan` / `tsan` / `fuzz` | sanitizers e libFuzzer |
 | `nativo` | `-march=native`, só para experimento |
 
-O CI (`.github/workflows/ci.yml`) roda os sete jobs a cada push: matriz de presets, os gates do
-projeto e o clang-tidy.
+O CI (`.github/workflows/ci.yml`) roda oito jobs a cada push: a matriz de presets, os gates do
+projeto, o harness de medição (que roda, confere o esquema do JSON e prova que o comparador
+reprova regressão e recusa carga diferente) e o clang-tidy.
 
 ```sh
 ./scripts/bootstrap-toolchain.sh && export PATH="$PWD/.toolchain/bin:$PATH"
 cmake --preset debug && cmake --build --preset debug && ctest --preset debug
 python3 scripts/check_invariants.py build/debug     # 13/13 invariantes com teste
 ./build/release/src/app/motor-rv-sim --dias 3 --negocios 20000 --investidores 2000
+./build/release/bench/motor-rv-bench --repeticoes 15   # medição (ADR-0021)
 ```
 
 O último comando roda três pregões por quatro partições — ~120 mil eventos — e imprime aceitos,
@@ -40,6 +43,7 @@ imagem de recuperação. Mesma semente, mesmo resultado.
 | `src/ingress/` | particionador congelado com valores golden e simulador determinístico que lê o calendário real da B3 |
 | `src/app/` | `motor-rv-sim` |
 | `src/wal/` | **parcial**: formato (`WalHdr` 32 B, `SegmentHdr`), descoberta de alinhamento via `statx` com fallback, três backends de I/O (io_uring, pwrite, injeção de falhas) |
+| `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes |
 
 ### Testes — 6 suítes, 13/13 invariantes
 
@@ -69,8 +73,13 @@ Em ordem de dependência:
    O formato (`src/format/exposure.hpp`) já está fechado.
 5. **Borda FAPI.** `src/edge/`: HTTP próprio (ADR-0019), JOSE sobre OpenSSL (ADR-0020),
    consentimento, limites, os seis endpoints, R1–R19 com teste.
-6. **Baseline.** `bench/` com o harness de ADR-0021. **Nenhuma otimização é aprovável antes
-   disto** (ADR-0016).
+6. **Baseline fixado.** O harness de ADR-0021 **existe** (`bench/`, exercitado ponta a ponta em
+   06/09/2026, limpo sob ASan/UBSan e TSan). O que falta é rodá-lo na MÁQUINA DE REFERÊNCIA e
+   promover os números: `motor-rv-bench --repeticoes 15 --gravar-baseline bench/baseline.json`.
+   A medição de 06/09 foi feita em outra máquina e ADR-0022 proíbe promover número de outra
+   máquina — os números e o que eles já revelaram estão em
+   `bench/reports/2026-09-06-medicao-inicial.md`. **Nenhuma otimização é aprovável antes disto**
+   (ADR-0016).
 
 O script `/tmp/.../wf-borda.js` (referenciado nos logs de workflow) tem a especificação detalhada
 dos itens 4 e 5, escrita e pronta para reexecução.
@@ -116,6 +125,17 @@ Estes valem mais que o código; estão registrados onde importam:
 7. **`-fno-exceptions` vazava por transitividade** para o ingress, que lê arquivo. Só quebrava no
    `release`. É a razão de a matriz de presets ser exercitada inteira.
 8. **Limite de payload é 65535, não 64 KiB**: `len` é `uint16`, e 65536 gravaria `len == 0`.
+9. **A RESTAURAÇÃO ainda é proporcional à capacidade configurada**, embora a imagem já não seja.
+   Medido em 06/09: a MESMA imagem de 2 703 624 bytes carrega em 9,31 ms com a capacidade de
+   medição e em 1,22 ms com a capacidade ajustada ao dado — 7,6× sem um byte de diferença. A causa
+   é `load_state_image` começar por `PartitionState::init`, que aloca e zera as colunas inteiras.
+   É a mesma classe de defeito que a revisão de 03/09 corrigiu do lado da escrita, viva do lado da
+   leitura. O experimento que comprova o conserto já está no harness (as duas séries têm de
+   convergir).
+10. **A carga faz parte do número.** Um pregão dá 7,3 M eventos/s e três pregões dão 5,4 M — o
+   estado cresce e a liquidação percorre listas mais longas. São dois números certos da MESMA
+   métrica. Por isso o JSON de medição grava o bloco `carga` e o comparador RECUSA confrontar
+   medições de cargas diferentes (código de saída 4) em vez de acusar 26 % de regressão inexistente.
 
 ## Armadilhas conhecidas
 
