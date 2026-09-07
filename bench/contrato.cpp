@@ -13,21 +13,35 @@ const Serie* serie_de(const std::vector<Serie>& series, const char* nome) noexce
   return nullptr;
 }
 
+namespace {
+
+// A suíte rodou (há séries do grupo na lista) e a série de nome `nome` não apareceu?
+[[nodiscard]] bool sumiu(const std::vector<Serie>& series, const char* grupo, const char* nome) {
+  bool grupo_rodou = false;
+  bool achou = false;
+  for (const Serie& s : series) {
+    if (s.grupo == grupo) grupo_rodou = true;
+    if (s.nome == nome) achou = true;
+  }
+  return grupo_rodou && !achou;
+}
+
+}  // namespace
+
 std::vector<std::string> contrato_quebrado(const std::vector<Serie>& series) {
   std::vector<std::string> faltando;
+  for (const SerieBloqueante& b : kSeriesBloqueantes) {
+    if (sumiu(series, b.grupo, b.serie)) {
+      faltando.emplace_back(std::string(b.serie) + " (bloqueia um PR no portão A/B)");
+    }
+  }
   for (const Metrica& m : kEsquemaMetricas) {
     if (m.serie == nullptr) continue;
     // "A suíte rodou" é lido da própria lista de séries, e não de `--suites`: quem escolhe as
     // suítes é o `main`, mas quem sabe o que de fato foi registrado é esta lista. Uma suíte que
     // desiste no meio (a partição não coube na arena) registra a série com `pula` e continua
     // presente aqui — é uma medição ausente com motivo, não um contrato quebrado.
-    bool grupo_rodou = false;
-    bool achou = false;
-    for (const Serie& s : series) {
-      if (s.grupo == m.grupo) grupo_rodou = true;
-      if (s.nome == m.serie) achou = true;
-    }
-    if (grupo_rodou && !achou) {
+    if (sumiu(series, m.grupo, m.serie)) {
       faltando.emplace_back(std::string(m.serie) + " (alimenta " + m.chave + ")");
     }
   }

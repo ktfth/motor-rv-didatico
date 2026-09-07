@@ -139,7 +139,7 @@ void registra_nucleo(Runner& r, const Carga& carga) {
   });
 
   // ------------------------------------------------------------ o domínio, sem o ring
-  (void)r.medir("nucleo", "nucleo.apply.eventos_por_s", Forma::Taxa, [&] {
+  (void)r.medir("nucleo", kSerieNucleoApply, Forma::Taxa, [&] {
     if (!nucleo->monta(cap)) return Amostra{0, 1};
     BenchJournal diario{buf->data(), buf->size()};
     diario.set_atraso(kAtrasoDurabilidade);

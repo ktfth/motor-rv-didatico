@@ -1,6 +1,6 @@
 {
-  "schema": 2,
-  "status": "sem baseline: o harness existe (bench/, ADR-0021) e foi exercitado ponta a ponta, mas a medição de 06/09/2026 foi feita fora da máquina de referência de docs/ambiente.md e ADR-0022 proíbe promover número de outra máquina. Fixar com `motor-rv-bench --repeticoes 15 --gravar-baseline bench/baseline.json` na máquina de referência. Números e achados: bench/reports/2026-09-06-medicao-inicial.md. O campo `schema` versiona os blocos comuns aos dois tipos de documento (ambiente, harness, carga, metricas); no 2 o baseline passou a declarar carga e harness, e o documento de MEDIÇÃO passou a trazer também o bloco `contrato`.",
+  "schema": 3,
+  "status": "sem baseline: o harness existe (bench/, ADR-0021) e foi exercitado ponta a ponta, mas a medição de 06/09/2026 foi feita fora da máquina de referência de docs/ambiente.md e ADR-0022 proíbe promover número de outra máquina. Fixar com `motor-rv-bench --repeticoes 15 --gravar-baseline bench/baseline.json` na máquina de referência. Números e achados: bench/reports/2026-09-06-medicao-inicial.md. O campo `schema` numera o formato dos dois documentos deste diretório (medição e baseline); a tabela do que mudou em cada versão está em bench/README.md.",
   "limiar_regressao_pct": 5,
   "ambiente": {
     "commit": null,

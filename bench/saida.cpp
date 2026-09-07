@@ -127,6 +127,20 @@ void escreve_contrato(std::FILE* f, const DescricaoCarga& carga) {
     escapa(f, m.rotulo);
     (void)std::fputs(" }", f);
   }
+  // As séries que REPROVAM um PR. Não é a mesma lista das métricas de baseline, e a diferença é o
+  // ponto: enquanto era, só duas séries podiam reprovar e uma piora de 195 % na restauração passava
+  // como informativa. Ver bench/contrato.hpp.
+  (void)std::fputs("\n    ],\n    \"bloqueantes\": [\n", f);
+  primeiro = true;
+  for (const SerieBloqueante& b : kSeriesBloqueantes) {
+    if (!primeiro) (void)std::fputs(",\n", f);
+    primeiro = false;
+    (void)std::fputs("      { \"serie\": ", f);
+    escapa(f, b.serie);
+    (void)std::fputs(", \"rotulo\": ", f);
+    escapa(f, b.rotulo);
+    (void)std::fputs(" }", f);
+  }
   (void)std::fputs("\n    ],\n    \"campos_carga\": [", f);
   primeiro = true;
   for (const auto& [nome, valor] : campos_da_carga(carga)) {
@@ -197,11 +211,11 @@ bool escreve_json(const std::string& caminho, const Ambiente& amb, const Config&
     return false;
   }
 
-  // schema 2: o documento passou a trazer o bloco `contrato` (as métricas obrigatórias, seus
-  // rótulos e os campos que definem a carga), de onde o relatório em Python tira as séries que TEM
-  // de comparar. Quem lê um documento `"schema": 1` sabe que aquele bloco não existe lá — e o
-  // relatório diz isso em vez de concluir que nada era obrigatório.
-  (void)std::fputs("{\n  \"schema\": 2,\n  \"status\": ", f);
+  // O `schema` numera o formato dos DOIS documentos deste diretório (a medição e o baseline), e a
+  // tabela do que mudou em cada versão está em bench/README.md. No 2 entrou o bloco `contrato`; no
+  // 3, a lista `bloqueantes` dentro dele. Quem lê um documento de versão menor sabe que o bloco
+  // não existe lá — e o relatório diz isso em vez de concluir que nada era obrigatório.
+  (void)std::fputs("{\n  \"schema\": 3,\n  \"status\": ", f);
   escapa(f, status);
   (void)std::fprintf(f, ",\n  \"limiar_regressao_pct\": %.0f,\n", 5.0);
 

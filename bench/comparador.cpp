@@ -290,35 +290,32 @@ int codigo_de(const Veredito& v) noexcept {
   return 0;
 }
 
-void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& arquivo) {
-  const int codigo = codigo_de(v);
-  (void)std::printf("\n== comparação com %s (limiar %.0f%%) ==\n", arquivo.c_str(), limiar_pct);
-  if (v.carga_incompativel) {
-    (void)std::printf(
-        "  CARGA DIFERENTE da do baseline: %s\n"
-        "  Nada comparado. Um pregão e três pregões dão números diferentes da MESMA\n"
-        "  métrica; confrontá-los mediria a diferença entre dois experimentos.\n",
-        v.motivo_carga.c_str());
-    return;
+namespace {
+
+// O portão de carga: o que foi conferido, o que não deu para conferir e por quê.
+void imprime_carga(const Veredito& v, int codigo) {
+  if (!v.execucao_sem_carga && v.carga_nao_conferida.empty()) return;
+  std::string motivo = "esta execução não gerou carga (nenhuma suíte que a use rodou)";
+  if (!v.execucao_sem_carga) {
+    motivo = "o baseline não declara ";
+    for (size_t i = 0; i < v.carga_nao_conferida.size(); ++i) {
+      if (i != 0) motivo += ", ";
+      motivo += v.carga_nao_conferida[i];
+    }
   }
-  if (v.execucao_sem_carga || !v.carga_nao_conferida.empty()) {
-    std::string motivo = "esta execução não gerou carga (nenhuma suíte que a use rodou)";
-    if (!v.execucao_sem_carga) {
-      motivo = "o baseline não declara ";
-      for (size_t i = 0; i < v.carga_nao_conferida.size(); ++i) {
-        if (i != 0) motivo += ", ";
-        motivo += v.carga_nao_conferida[i];
-      }
-    }
-    (void)std::printf(
-        "  CARGA NÃO CONFERIDA: %s\n"
-        "  A carga faz parte do número — um pregão dá 7,3 M eventos/s e três dão 5,4 M da MESMA\n"
-        "  métrica. Sem conferi-la, o que vem abaixo pode estar comparando dois experimentos.\n"
-        "  Regrave o baseline com --gravar-baseline para que ele passe a declarar a carga.\n",
-        motivo.c_str());
-    if (codigo == 5) {
-      (void)std::printf("  É o que o código de saída 5 diz.\n");
-    }
+  (void)std::printf(
+      "  CARGA NÃO CONFERIDA: %s\n"
+      "  A carga faz parte do número — um pregão dá 7,3 M eventos/s e três dão 5,4 M da MESMA\n"
+      "  métrica. Sem conferi-la, o que vem abaixo pode estar comparando dois experimentos.\n"
+      "  Regrave o baseline com --gravar-baseline para que ele passe a declarar a carga.\n",
+      motivo.c_str());
+  if (codigo == 5) (void)std::printf("  É o que o código de saída 5 diz.\n");
+}
+
+// As métricas contratuais que o gate NÃO comparou, e por quê.
+void imprime_ausencias(const Veredito& v, int codigo) {
+  for (const std::string& k : v.sem_baseline) {
+    (void)std::printf("  %-44s SEM BASELINE — nada a comparar\n", k.c_str());
   }
   for (const std::string& k : v.nao_comparadas) {
     const size_t espaco = k.find(' ');
@@ -327,41 +324,56 @@ void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& a
     if (!motivo.empty() && motivo.front() == '(') motivo = motivo.substr(1, motivo.size() - 2);
     (void)std::printf("  %-44s NÃO COMPARADA: %s\n", chave.c_str(), motivo.c_str());
   }
-  if (v.comparacoes.empty() && v.sem_baseline.empty() && v.nao_comparadas.empty()) {
-    (void)std::printf("  nenhuma métrica desta execução tem chave no baseline.\n");
-    return;
-  }
-  for (const std::string& k : v.sem_baseline) {
-    (void)std::printf("  %-44s SEM BASELINE — nada a comparar\n", k.c_str());
-  }
-  if (!v.sem_baseline.empty() || !v.nao_comparadas.empty()) {
+  if (v.sem_baseline.empty() && v.nao_comparadas.empty()) return;
+  (void)std::printf(
+      "  As de cima são métricas CONTRATUAIS que o gate NÃO comparou — por falta de número\n"
+      "  no baseline ou por a medição desta execução ter saído ruim. \"Não deu para\n"
+      "  comparar\" não é aprovação: fixe o baseline na máquina de referência, ou repita a\n"
+      "  medição numa máquina quieta.\n");
+  if (codigo == 6) (void)std::printf("  É o código de saída 6, e não 0.\n");
+}
+
+}  // namespace
+
+void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& arquivo) {
+  const int codigo = codigo_de(v);
+  (void)std::printf("\n== comparação com %s (limiar %.0f%%) ==\n", arquivo.c_str(), limiar_pct);
+
+  // Um ponto de saída só. Os dois `return` que existiam aqui puravam a última linha — a que diz
+  // qual código este processo devolve — justamente nos dois casos em que ela mais importa: carga
+  // incompatível (4) e "nenhuma métrica tem chave no baseline". Uma promessa de texto que não
+  // vale em duas bordas é a mesma classe de defeito que a linha existe para fechar.
+  if (v.carga_incompativel) {
     (void)std::printf(
-        "  As de cima são métricas CONTRATUAIS que o gate NÃO comparou — por falta de número\n"
-        "  no baseline ou por a medição desta execução ter saído ruim. \"Não deu para\n"
-        "  comparar\" não é aprovação: fixe o baseline na máquina de referência, ou repita a\n"
-        "  medição numa máquina quieta.\n");
-    if (codigo == 6) {
-      (void)std::printf("  É o código de saída 6, e não 0.\n");
+        "  CARGA DIFERENTE da do baseline: %s\n"
+        "  Nada comparado. Um pregão e três pregões dão números diferentes da MESMA\n"
+        "  métrica; confrontá-los mediria a diferença entre dois experimentos.\n",
+        v.motivo_carga.c_str());
+  } else {
+    imprime_carga(v, codigo);
+    if (v.comparacoes.empty() && v.sem_baseline.empty() && v.nao_comparadas.empty()) {
+      (void)std::printf("  nenhuma métrica desta execução tem chave no baseline.\n");
+    } else {
+      imprime_ausencias(v, codigo);
+      for (const Comparacao& c : v.comparacoes) {
+        (void)std::printf("  %-44s baseline %12.2f  medido %12.2f  %+7.2f%%  %s\n", c.chave.c_str(),
+                          c.baseline, c.medido, c.variacao_pct, c.regressao ? "REGRESSÃO" : "ok");
+      }
+    }
+    if (v.comparou_sem_conferir_carga()) {
+      (void)std::printf(
+          "\n  As linhas acima NÃO são aprovação: elas comparam números cuja carga não foi\n"
+          "  conferida.%s\n",
+          codigo == 5 ? " É o que o código de saída 5 diz." : "");
+    }
+    if (v.houve_regressao) {
+      (void)std::printf(
+          "\n  Há regressão acima do limiar. ADR-0016: nenhuma otimização é aprovável\n"
+          "  contra um baseline que ela mesma derrubou.\n");
     }
   }
-  for (const Comparacao& c : v.comparacoes) {
-    (void)std::printf("  %-44s baseline %12.2f  medido %12.2f  %+7.2f%%  %s\n", c.chave.c_str(),
-                      c.baseline, c.medido, c.variacao_pct, c.regressao ? "REGRESSÃO" : "ok");
-  }
-  if (v.comparou_sem_conferir_carga()) {
-    (void)std::printf(
-        "\n  As linhas acima NÃO são aprovação: elas comparam números cuja carga não foi\n"
-        "  conferida.%s\n",
-        codigo == 5 ? " É o que o código de saída 5 diz." : "");
-  }
-  if (v.houve_regressao) {
-    (void)std::printf(
-        "\n  Há regressão acima do limiar. ADR-0016: nenhuma otimização é aprovável\n"
-        "  contra um baseline que ela mesma derrubou.\n");
-  }
-  // A última linha é o código que ESTE processo vai devolver. Sem ela, quem lê o terminal deduz o
-  // código pelos avisos que apareceram — e foi assim que o texto passou a prometer um 5 num caso
-  // que saía 3.
+
+  // A última linha é o código que ESTE processo vai devolver, em todos os caminhos.
   (void)std::printf("\n  código de saída: %d\n", codigo);
 }
 

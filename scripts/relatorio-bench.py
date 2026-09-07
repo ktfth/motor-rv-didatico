@@ -160,8 +160,10 @@ def consolida(docs):
 
 # Teto de ruído: acima disto a comparação não decide nada.
 #
-# O número não é gosto. Este gate promete pegar REGRESSÃO GROSSA — "um fator", diz o README, isto
-# é 2×, que é um Δ de −50 %. Se o limiar exigido passa de 50 %, uma regressão de 2× cabe dentro
+# O número não é gosto: ele ESPELHA uma frase do bench/README.md — "o gate pega regressão grossa —
+# um fator". Um fator é 2×, que é um Δ de −50 %. As duas constantes vivem em arquivos diferentes e
+# uma é o argumento da outra, então elas mudam juntas: prometer pegar 1,5× obriga a baixar o teto
+# para 33 %, e subir o teto obriga a reescrever a promessa. Se o limiar exigido passa de 50 %, uma regressão de 2× cabe dentro
 # dele: o gate deixou de conseguir cumprir o que promete, e chamar isso de "sem regressão" é a
 # mesma aprovação vazia que o resto desta rodada corrigiu. Então acima do teto a série contratual
 # conta como NÃO COMPARADA (código 2), e não como aprovada.
@@ -226,7 +228,7 @@ def compara(cabeca, base, limiar_pct, sigmas, teto_pct=TETO_EXIGIDO_PCT):
     return linhas, nao_comparadas
 
 
-def veredito_de(linhas, nao_comparadas, exigidas, tem_base, carga_ruim, sem_contrato):
+def veredito_de(linhas, nao_comparadas, exigidas, tem_base, carga_ruim, sem_exigencia):
     """O veredito inteiro: as duas frases E o código de saída, decididos no mesmo lugar.
 
     Eram dois lugares com precedências diferentes, e a contradição aparecia no relatório: cabeça
@@ -258,14 +260,15 @@ def veredito_de(linhas, nao_comparadas, exigidas, tem_base, carga_ruim, sem_cont
     novas = [n for n, m in fora.items() if m == "não existe na base"]
     cegas = [n for n in fora if n not in novas]
 
-    if sem_contrato:
-        frases = (
-            "**Não dá para dar veredito.** Este JSON não declara o contrato de métricas (é de um "
-            "harness anterior ao bloco `contrato`), então não há como saber o que tinha de ser "
-            "comparado. Rode a medição com o binário desta árvore, ou passe `--exigir`.",
-            "sem contrato no JSON: nenhuma métrica obrigatória pôde ser exigida.",
+    if sem_exigencia:
+        return (
+            "**Não dá para dar veredito.** Nenhuma série foi declarada como bloqueante — ou este "
+            "JSON não traz o bloco `contrato` (é de um harness anterior a ele), ou `--exigir` veio "
+            "sem valores. Sem uma lista do que tem de ser comparado, \"sem regressão\" seria uma "
+            "afirmação sobre coisa nenhuma.",
+            "nenhuma série bloqueante declarada: não havia o que exigir.",
+            2, cegas, novas, fora,
         )
-        return frases[0], frases[1], 2, cegas, novas, fora
     if carga_ruim:
         return (
             "**Não dá para comparar os dois lados:** eles mediram cargas diferentes — "
@@ -367,7 +370,7 @@ def carga_divergente(doc_a, doc_b):
 
 
 def contrato_de(doc):
-    """As séries contratuais e o nome de cada uma em português corrente.
+    """As métricas de baseline do contrato, com o rótulo de cada uma em português corrente.
 
     Vem do bloco `contrato`, que o harness emite de `bench/contrato.hpp`: no schema 2 ele é um
     objeto com `metricas` e `campos_carga`; a primeira versão do bloco era a lista de métricas
@@ -377,6 +380,23 @@ def contrato_de(doc):
     c = doc.get("contrato")
     metricas = c.get("metricas", []) if isinstance(c, dict) else (c or [])
     return [m for m in metricas if m.get("serie")]
+
+
+def bloqueantes_de(doc):
+    """As séries que REPROVAM um PR, com o rótulo de cada uma (`contrato.bloqueantes`, schema 3).
+
+    Não é a mesma lista das métricas de baseline, e a diferença é o ponto: enquanto era, só duas
+    das dezoito séries podiam reprovar, e uma piora de 195 % em `snapshot.carrega.duracao_ms`
+    saía como "informativa, não vota". Quais séries entram na lista é decisão MEDIDA — ver
+    bench/contrato.hpp e a campanha em bench/README.md.
+
+    JSON anterior ao schema 3 não declara a lista; aí valem as métricas de baseline, que era o
+    conjunto bloqueante da versão que escreveu aquele arquivo.
+    """
+    c = doc.get("contrato")
+    if isinstance(c, dict) and c.get("bloqueantes"):
+        return [b for b in c["bloqueantes"] if b.get("serie")]
+    return contrato_de(doc)
 
 
 def linha_resumo(e, l, unidade, motivo):
@@ -402,7 +422,6 @@ def linha_resumo(e, l, unidade, motivo):
     return valor, f"{l['delta']:+.1f}% — dentro do ruído (exigido {l['exigido']:.1f}%)"
 
 
-#!/usr/bin/env python3
 
 
 def secao_resumo(doc, cabeca, linhas, fora, tem_base, frase, cegas, saida):
@@ -412,7 +431,14 @@ def secao_resumo(doc, cabeca, linhas, fora, tem_base, frase, cegas, saida):
     auditar 24 séries. O detalhe continua embaixo, inteiro; o que muda é que ninguém precisa
     reconstruir o veredito lendo uma tabela de medianas.
     """
-    contrato = contrato_de(doc)
+    # A tabela do resumo mostra primeiro as séries que DECIDEM o veredito, e depois as métricas de
+    # baseline que não decidem — marcadas como informativas. As duas listas são pequenas e dizem
+    # coisas diferentes: uma é o que reprovou ou não reprovou o PR, a outra é o que vai virar
+    # baseline. Omitir a segunda faria o resumo esconder metade do contrato; misturá-las sem marca
+    # faria o leitor achar que a segunda vota.
+    bloqueia = {b["serie"] for b in bloqueantes_de(doc)}
+    contrato = list(bloqueantes_de(doc))
+    contrato += [m for m in contrato_de(doc) if m["serie"] not in bloqueia]
     por_nome = {l["nome"]: l for l in linhas}
 
     saida.append("## Resumo\n")
@@ -429,6 +455,8 @@ def secao_resumo(doc, cabeca, linhas, fora, tem_base, frase, cegas, saida):
             valor, veredito = linha_resumo(
                 e, por_nome.get(c["serie"]), unidade, fora.get(c["serie"])
             )
+            if c["serie"] not in bloqueia:
+                veredito += " · informativa, não vota"
             saida.append(
                 f"| {c['rotulo']} | {valor} | {veredito} |" if tem_base
                 else f"| {c['rotulo']} | {valor} |"
@@ -619,14 +647,18 @@ def main():
     docs = carrega(a.medicao)
     cabeca = consolida(docs)
     limiar = a.limiar_pct if a.limiar_pct is not None else docs[0].get("limiar_regressao_pct", 5.0)
-    # A lista de séries obrigatórias vem do JSON, não daqui. Ver contrato_de().
-    contrato = contrato_de(docs[0])
-    exigidas = a.exigir if a.exigir is not None else [c["serie"] for c in contrato]
-    # Sem contrato e sem `--exigir` não há o que exigir — e é justamente aí que o veredito não
-    # pode sair verde: era o "Sem regressão, rc 0" com zero métricas obrigatórias conferidas.
+    # As séries que decidem vêm do JSON, não daqui. Ver bloqueantes_de().
+    bloqueantes = bloqueantes_de(docs[0])
+    exigidas = a.exigir if a.exigir is not None else [b["serie"] for b in bloqueantes]
+    # Lista de exigidas VAZIA não é "nada a reprovar": é "não há o que exigir", e nesse estado o
+    # veredito não pode sair verde. Vale para as duas maneiras de chegar nele — JSON sem o bloco
+    # `contrato`, e `--exigir` passada sem valores (que `--exigir $VAR` com a variável vazia
+    # produz sem ninguém perceber). Com R3 aplicada, este estado significava que NADA podia
+    # reprovar: uma regressão real de 2× saía `rc=0`, "Sem regressão".
+    #
     # Só vale quando há comparação: sem `--contra` não existe veredito para falhar aberto, e o
-    # resumo já diz, na tabela, que o JSON não declara contrato. `--apendice` não dá veredito.
-    sem_contrato = not contrato and a.exigir is None and bool(a.contra) and not a.apendice
+    # resumo já diz, na tabela, quando o JSON não declara contrato. `--apendice` não dá veredito.
+    sem_exigencia = not exigidas and bool(a.contra) and not a.apendice
 
     # A comparação é calculada ANTES de escrever qualquer coisa: o resumo abre o relatório e
     # precisa do veredito que antes só existia no meio dele.
@@ -642,7 +674,7 @@ def main():
     # para dizer" e processo devolvendo 0, nem resumo dizendo "sem veredito" e job anunciando
     # regressão.
     frase_resumo, frase_detalhe, rc, cegas, novas, fora = veredito_de(
-        linhas, nao_comparadas, exigidas, bool(a.contra), carga_ruim, sem_contrato
+        linhas, nao_comparadas, exigidas, bool(a.contra), carga_ruim, sem_exigencia
     )
 
     saida = []

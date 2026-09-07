@@ -38,7 +38,8 @@ void uso() {
       "  --aquecimento N       repetições descartadas antes de medir (padrão 2)\n"
       "  --limiar-cv PCT       acima disto a série é descartada e refeita (padrão 5)\n"
       "  --tentativas N        quantas séries refazer antes de desistir (padrão 3)\n"
-      "  --rapido              perfil de fumaça para CI: 1 aquecimento, 3 repetições, CV 25%\n"
+      "  --rapido              perfil de fumaça para CI: 1 aquecimento, 3 repetições, CV 25%.\n"
+      "                        Por afrouxar o CV, ele NÃO grava baseline (ver --gravar-baseline)\n"
       "\n"
       "  --dias N              pregões da carga (padrão 1)\n"
       "  --negocios N          negócios por pregão (padrão 20000)\n"
@@ -64,6 +65,51 @@ void uso() {
       "                   medida nunca é mascarada por uma conferência que faltou)\n");
 }
 
+// `--conferir-esquema`: confere um arquivo de baseline contra bench/contrato.hpp e devolve o
+// código de saída. Não mede nada — é um gate de arquivo, e o CI o chama sobre `bench/baseline.json`
+// a cada PR, inclusive contra uma cópia com a chave renomeada de propósito.
+[[nodiscard]] int confere_esquema(const std::string& caminho) {
+  rv::bench::DocumentoJson doc;
+  std::string erro;
+  if (!rv::bench::le_json(caminho, doc, erro)) {
+    (void)std::fprintf(stderr, "motor-rv-bench: %s\n", erro.c_str());
+    return 1;
+  }
+  // O `schema` do arquivo também é conferido aqui: ele já ficou para trás em silêncio (o
+  // baseline em 1 enquanto a medição foi para 2), e um número de versão que ninguém lê não
+  // versiona nada.
+  const auto it_schema = doc.find("schema");
+  const double schema =
+      (it_schema != doc.end() && it_schema->second.tipo == rv::bench::ValorJson::Tipo::Numero)
+          ? it_schema->second.numero
+          : 0.0;
+  if (schema < 2.0) {
+    (void)std::fprintf(stderr,
+                       "motor-rv-bench: %s: schema %.0f — o esquema atual é 2 (o baseline "
+                       "declara `carga` e `harness`).\n",
+                       caminho.c_str(), schema);
+    return 2;
+  }
+  std::vector<std::string> caminhos;
+  caminhos.reserve(doc.size());
+  for (const auto& [chave, valor] : doc) caminhos.push_back(chave);
+  const std::vector<std::string> ruins = rv::bench::divergencias_de_esquema(caminhos);
+  if (ruins.empty()) {
+    (void)std::printf("%s: as chaves de `metricas` batem com bench/contrato.hpp\n",
+                      caminho.c_str());
+    return 0;
+  }
+  for (const std::string& r : ruins) {
+    (void)std::fprintf(stderr, "motor-rv-bench: %s: %s\n", caminho.c_str(), r.c_str());
+  }
+  (void)std::fprintf(stderr,
+                     "O arquivo de baseline é versionado à mão e não pode divergir do esquema: "
+                     "chave que o comparador\nprocura e não acha sai como \"SEM BASELINE\" — "
+                     "um gate que não compara nada. Corrija o arquivo\nou bench/contrato.hpp, "
+                     "conforme quem estiver certo.\n");
+  return 2;
+}
+
 [[nodiscard]] bool tem(const std::string& lista, const char* nome) {
   return lista.empty() || lista.find(nome) != std::string::npos;
 }
@@ -79,6 +125,7 @@ int main(int argc, char** argv) {
   std::string baseline;
   std::string gravar;
   std::string conferir;
+  bool usou_rapido = false;
   uint32_t dias = 1, negocios = 20000, investidores = 2000;
   uint64_t semente = 20260902;
   const uint32_t data_inicial = 20260902;
@@ -97,6 +144,7 @@ int main(int argc, char** argv) {
     else if (a == "--tentativas" && tem_valor)
       cfg.tentativas = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 10));
     else if (a == "--rapido") {
+      usou_rapido = true;
       cfg.aquecimento = 1;
       cfg.repeticoes = 3;
       cfg.limiar_cv_pct = 25.0;
@@ -129,49 +177,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Conferir o esquema não mede nada: é um gate de arquivo, e roda antes de o harness montar
-  // qualquer coisa (o CI o chama sobre `bench/baseline.json` a cada PR).
-  if (!conferir.empty()) {
-    rv::bench::DocumentoJson doc;
-    std::string erro;
-    if (!rv::bench::le_json(conferir, doc, erro)) {
-      (void)std::fprintf(stderr, "motor-rv-bench: %s\n", erro.c_str());
-      return 1;
-    }
-    // O `schema` do arquivo também é conferido aqui: ele já ficou para trás em silêncio (o
-    // baseline em 1 enquanto a medição foi para 2), e um número de versão que ninguém lê não
-    // versiona nada.
-    const auto it_schema = doc.find("schema");
-    const double schema =
-        (it_schema != doc.end() && it_schema->second.tipo == rv::bench::ValorJson::Tipo::Numero)
-            ? it_schema->second.numero
-            : 0.0;
-    if (schema < 2.0) {
-      (void)std::fprintf(stderr,
-                         "motor-rv-bench: %s: schema %.0f — o esquema atual é 2 (o baseline "
-                         "declara `carga` e `harness`).\n",
-                         conferir.c_str(), schema);
-      return 2;
-    }
-    std::vector<std::string> caminhos;
-    caminhos.reserve(doc.size());
-    for (const auto& [chave, valor] : doc) caminhos.push_back(chave);
-    const std::vector<std::string> ruins = rv::bench::divergencias_de_esquema(caminhos);
-    if (ruins.empty()) {
-      (void)std::printf("%s: as chaves de `metricas` batem com bench/contrato.hpp\n",
-                        conferir.c_str());
-      return 0;
-    }
-    for (const std::string& r : ruins) {
-      (void)std::fprintf(stderr, "motor-rv-bench: %s: %s\n", conferir.c_str(), r.c_str());
-    }
-    (void)std::fprintf(stderr,
-                       "O arquivo de baseline é versionado à mão e não pode divergir do esquema: "
-                       "chave que o comparador\nprocura e não acha sai como \"SEM BASELINE\" — "
-                       "um gate que não compara nada. Corrija o arquivo\nou bench/contrato.hpp, "
-                       "conforme quem estiver certo.\n");
-    return 2;
-  }
+  if (!conferir.empty()) return confere_esquema(conferir);
 
   if (cfg.repeticoes < 2 || cfg.tentativas < 1) {
     (void)std::fprintf(stderr,
@@ -294,11 +300,17 @@ int main(int argc, char** argv) {
     // lê. Como o README promete que gravar-baseline "recusa se qualquer série estiver instável",
     // sem condição, é aqui que a promessa passa a valer.
     if (cfg.limiar_cv_pct != rv::bench::Config{}.limiar_cv_pct) {
-      (void)std::fprintf(stderr,
-                         "motor-rv-bench: recuso gravar baseline com --limiar-cv %.1f%% (o padrão "
-                         "é %.1f%%).\nUm limiar afrouxado faz toda série sair `estável` e esvazia "
-                         "a recusa por instabilidade.\n",
-                         cfg.limiar_cv_pct, rv::bench::Config{}.limiar_cv_pct);
+      // Quem afrouxou o limiar pode ter sido `--rapido`, e a mensagem tem de nomear a flag que a
+      // pessoa digitou — culpar `--limiar-cv 25` quem escreveu `--rapido` manda procurar uma flag
+      // que não está na linha de comando.
+      (void)std::fprintf(
+          stderr,
+          "motor-rv-bench: recuso gravar baseline com limiar de CV em %.1f%% (o padrão é %.1f%%)"
+          "%s.\nUm limiar afrouxado faz toda série sair `estável` e esvazia a recusa por "
+          "instabilidade.\n",
+          cfg.limiar_cv_pct, rv::bench::Config{}.limiar_cv_pct,
+          usou_rapido ? " — foi `--rapido` que o afrouxou, e perfil de fumaça não fixa baseline"
+                      : "");
       return 2;
     }
     bool alguma_instavel = false;

@@ -123,7 +123,7 @@ o preset `debug`; e `scripts/relatorio-bench.py` tem de aprovar 3 % e reprovar 5
 determinístico em qualquer máquina.
 
 **`medicao`** responde "este PR está mais lento que a base?". Ele compila as DUAS árvores e mede
-os dois lados **intercalados, três vezes cada, no mesmo runner** — o único arranjo em que a
+os dois lados **intercalados, cinco vezes cada, no mesmo runner** — o único arranjo em que a
 comparação isola a mudança de código do hardware. O relatório vai para o resumo do job e para os
 artefatos.
 
@@ -144,6 +144,11 @@ As três linhas são o mesmo dado, lido por três versões do script. A do meio 
 mas deixava **qualquer** série votar; o vermelho falso dela foi uma série não contratual. A de hoje
 só deixa votar quem o contrato nomeia.
 
+Uma segunda campanha independente repetiu 15 rodadas inocentes e 5 reais: somadas às primeiras, são
+**30 rodadas com o mesmo binário dos dois lados** e **10 regressões reais reprovadas 10/10**. Uma
+terceira campanha trocou o método — dois BINÁRIOS de código idêntico, que é o que o job faz — e está
+na seção seguinte: é ela que decide quem pode reprovar um PR.
+
 Na regressão real, `nucleo.loop.eventos_por_s_por_core` caiu entre 37,7 % e 50,0 % e foi marcada nas
 5 rodadas. `snapshot.salva.duracao_ms` não foi marcada em nenhuma, e está certo: `-O0` no `apply`
 não torna o snapshot mais lento.
@@ -157,11 +162,13 @@ Ou seja: o gate pega **regressão grossa** — um fator, um `O(n²)` acidental, 
 que caiu. Não pega 5 %, e prometer que pegaria seria construir um gate que reprova PR inocente até
 alguém desligá-lo.
 
-**O teto de 50 %.** Acima dele a série contratual conta como não comparada (código 2), e não como
-aprovada. O número não é gosto: este gate promete pegar um fator — 2×, isto é um Δ de −50 %. Se o
-limiar exigido passa de 50 %, uma regressão de 2× cabe dentro dele e "sem regressão" vira uma
-afirmação que a medição não sustenta. O teto é o ponto onde o gate admite que não enxerga o que
-prometeu enxergar; o remédio é mais execuções por lado, não um teto mais alto.
+**O teto de 50 %** (`TETO_EXIGIDO_PCT`, em `scripts/relatorio-bench.py`). Acima dele a série
+bloqueante conta como não comparada (código 2), e não como aprovada. O número não é gosto: ele
+espelha a frase "**pega regressão grossa — um fator**" do parágrafo acima. Um fator é 2×, isto é um
+Δ de −50 %; se o limiar exigido passa de 50 %, uma regressão de 2× cabe dentro dele e "sem
+regressão" vira uma afirmação que a medição não sustenta. As duas coisas mudam juntas: se um dia o
+gate prometer pegar 1,5×, o teto vai a 33 %. O teto é o ponto onde ele admite que não enxerga o que
+prometeu; o remédio é mais execuções por lado, não um teto mais alto.
 
 Quem pega 5 % é o outro gate: `motor-rv-bench --comparar bench/baseline.json`, rodado por
 `desempenho` na máquina de referência, onde o baseline vale (ADR-0022).
@@ -184,6 +191,65 @@ motivo de não ser mais está medido na seção abaixo.
 
 Série que a base não tem (uma métrica nova introduzida pelo PR) não cai no 2: não há cegueira, há
 primeira medição. Ela aparece no resumo e não reprova.
+
+## Quem reprova um PR não é quem vira baseline
+
+São duas perguntas, e elas estavam no mesmo campo. `kEsquemaMetricas` (em `bench/contrato.hpp`) diz
+quais métricas `bench/baseline.json` publica — o alvo que `desempenho` fixa na máquina de
+referência. O portão A/B do CI faz outra: quais séries, se piorarem, **reprovam este PR**. Enquanto
+a segunda resposta era "as da primeira", só 2 das 18 séries medidas podiam reprovar, e uma piora de
+195 % em `snapshot.carrega.duracao_ms` — o tempo de voltar ao ar depois de uma queda — saía como
+"informativa, não vota".
+
+A lista bloqueante é `kSeriesBloqueantes`, viaja no bloco `contrato` do JSON e hoje tem **uma**
+série: `nucleo.loop.eventos_por_s_por_core`, o motor completo. As outras dezessete aparecem no
+relatório, marcadas `informativa, não vota`.
+
+**Quem entra na lista é decisão medida — e três candidatas saíram por causa do número.**
+
+Antes dos números, o método, porque ele mudou no meio desta rodada. Um "PR inocente" **não** é o
+mesmo binário medido dos dois lados: o job compila as DUAS árvores, e dois binários de código
+idêntico têm layout diferente. Medir um binário contra si mesmo esconde esse viés por construção.
+As duas primeiras campanhas fizeram isso, e por isso deram 0/30 a uma série que reprova 13 de 15 PRs
+inocentes de verdade. A terceira campanha compara **dois binários** — o mesmo commit com uma edição
+semanticamente neutra em `bench/harness.cpp` — e é ela que vale para decidir quem bloqueia.
+
+| série | mesmo binário (30 rodadas) | dois binários (15 rodadas) | por que ficou de fora |
+|---|---|---|---|
+| `nucleo.loop.eventos_por_s_por_core` | 0/30 | **0/15** | — bloqueia |
+| `snapshot.salva.duracao_ms` | 0/30 | **13/15** | repetível dentro de um binário (±3 %), anda +9,0 % a +18,5 % entre binários de mesmo código |
+| `nucleo.apply.eventos_por_s` | 1/30 | não avaliada | um vermelho falso com os dois lados derivando (−13,8 %) e ruído estimado de ±2,8 % |
+| `snapshot.carrega.duracao_ms` | 1/30 + 2 cegas | não avaliada | saltou de 9,09 para 16,89 ms (+85,8 %) entre execuções do MESMO binário; bimodal por HANDOFF §9 |
+
+O caso de `snapshot.salva.duracao_ms` é o mais instrutivo: a mesma edição neutra move a série de
+0,32 para 0,37 ms sem tocar em uma linha de `save_state_image`. Uma série assim — muito repetível
+dentro de um binário e sensível a layout entre binários — é a pior combinação possível para um
+portão A/B, porque o ruído que ela declara é pequeno demais para o viés que ela sofre. Ela continua
+sendo métrica de **baseline** (é outra pergunta, e outra máquina) e continua no relatório.
+
+O que traria cada uma de volta: a convergência das séries de carga (`carrega`), uma reexecução de
+confirmação antes de reprovar (`apply`), ou um piso de limiar por série calibrado pelo viés de
+layout medido (`salva`). Nenhuma dessas é decisão deste diretório.
+
+Com o conjunto entregue: **0/15 de vermelho falso e 0/15 de cegueira** nas 15 rodadas de dois
+binários, e **10/10** nas dez rodadas de regressão real das duas primeiras campanhas.
+
+## O campo `schema`
+
+Ele numera o formato dos dois documentos deste diretório, o de medição e o baseline. Um documento
+declara a versão para a qual foi escrito; quem lê uma versão menor sabe quais blocos não existem lá
+e diz isso, em vez de concluir que nada era obrigatório.
+
+| versão | o que mudou |
+|---|---|
+| 1 | primeira: `ambiente` e `metricas` nos dois; o baseline sem `carga` e sem `harness` |
+| 2 | o baseline passa a declarar `carga` e `harness`; a medição passa a trazer `contrato` (métricas de baseline, rótulos e campos da carga) |
+| 3 | o `contrato` da medição passa a declarar `bloqueantes` — as séries que reprovam um PR |
+
+Onde isso é conferido: `--conferir-esquema` recusa um baseline anterior ao **2** (é o que aquela
+conferência depende: os blocos `carga` e `harness`), e o job `verificacao` exige **3** no documento
+de medição, porque é onde `bloqueantes` entrou. Sem o número, "schema 1" designaria dois formatos
+diferentes conforme a data.
 
 ## O baseline versionado e o esquema
 

@@ -48,6 +48,7 @@ namespace rv::bench {
 // Os nomes das séries que alimentam o baseline. Constantes porque são citadas em dois lugares
 // (o registro da série e a tabela abaixo), e dois literais iguais é a forma de um deles envelhecer.
 inline constexpr const char* kSerieNucleoLoop = "nucleo.loop.eventos_por_s_por_core";
+inline constexpr const char* kSerieNucleoApply = "nucleo.apply.eventos_por_s";
 inline constexpr const char* kSerieSnapshotSalva = "snapshot.salva.duracao_ms";
 
 // A forma do valor no JSON. Não é enfeite de emissão: é o que permite `escreve_json` gerar o
@@ -126,6 +127,66 @@ inline constexpr Metrica kEsquemaMetricas[] = {
      .motivo = "src/edge/ não existe (fase 4)"},
 };
 
+// ---------------------------------------------------------------------------------------------
+// O QUE REPROVA UM PR NÃO É O QUE VIRA BASELINE
+//
+// São duas perguntas, e elas estavam no mesmo campo. `kEsquemaMetricas` diz quais métricas o
+// `bench/baseline.json` publica — o alvo que `desempenho` fixa na máquina de referência. O portão
+// A/B do CI faz outra pergunta: quais séries, se piorarem, REPROVAM este PR. Enquanto a segunda
+// resposta era "as da primeira", só 2 das 18 séries medidas podiam reprovar: uma piora de 195 % em
+// `snapshot.carrega.duracao_ms` — o tempo de voltar ao ar depois de uma queda — passava como
+// "informativa, não vota".
+//
+// A lista abaixo é a segunda resposta, e ela é maior. Ela também é MEDIDA: uma série só bloqueia
+// se o ruído dela couber no portão. Ver bench/README.md para a campanha e os números.
+struct SerieBloqueante {
+  const char* serie;
+  const char* grupo;   // a suíte que a mede — `contrato_quebrado()` confere que ela apareceu
+  const char* rotulo;  // o que ela é, em português corrente, para o resumo do relatório
+};
+
+inline constexpr SerieBloqueante kSeriesBloqueantes[] = {
+    {.serie = kSerieNucleoLoop,
+     .grupo = "nucleo",
+     .rotulo = "Eventos de um pregão processados por segundo, por core"},
+};
+
+// TRÊS candidatas ficaram de fora, e a ausência das três é medida — não esquecimento.
+//
+// Antes dos números, o método, porque ele mudou no meio: um "PR inocente" NÃO é o mesmo binário
+// medido dos dois lados. O job compila as DUAS árvores, e dois binários de código idêntico têm
+// layout diferente. Medir o mesmo binário contra si mesmo esconde esse viés por construção — foi o
+// que as duas primeiras campanhas fizeram, e por isso elas deram 0/30 para uma série que reprova
+// 13 de 15 PRs inocentes de verdade. As linhas abaixo dizem qual campanha produziu cada número.
+//
+// Com o MESMO binário dos dois lados (30 rodadas, parâmetros do job, 5 execuções por lado):
+//
+//   `snapshot.carrega.duracao_ms` — 1 vermelho falso (saltou de 9,09 para 16,89 ms, +85,8 %, entre
+//   execuções do MESMO binário) e 2 rodadas cegas (exigido de 50,8 % e 59,3 %, acima do teto). É a
+//   série que a restauração proporcional à capacidade configurada torna bimodal (HANDOFF, achado
+//   9): ela é exatamente o que se quer medir, e por isso não serve para reprovar ninguém enquanto
+//   o defeito que ela expõe estiver aberto.
+//
+//   `nucleo.apply.eventos_por_s` — 1 vermelho falso em 30. Ela entrou na lista, foi medida, e saiu
+//   por causa do número: numa rodada os dois lados derivaram (6,37 M contra 5,48 M, −13,8 %) com
+//   um ruído estimado de ±2,8 %, e o portão reprovou um PR que não mudou uma linha. O ruído por
+//   lado não enxerga um degrau da máquina ENTRE os dois blocos; nas mesmas 30 rodadas,
+//   `nucleo.loop` e `snapshot.salva` deram 0.
+//
+// E com DOIS BINÁRIOS de código semanticamente idêntico (15 rodadas — o mesmo commit com uma
+// edição neutra em bench/harness.cpp, que só muda o layout):
+//
+//   `snapshot.salva.duracao_ms` — 13 vermelhos falsos em 15. Ela é repetível DENTRO de um binário
+//   (±3 %) e anda de +9,0 % a +18,5 % ENTRE binários que só diferem de layout; um limiar exigido
+//   de 6-8 % não tem como sobreviver a isso. A mesma edição neutra move a série de 0,32 para
+//   0,37 ms sem tocar em uma linha de `save_state_image`. `nucleo.loop`, na mesma campanha, deu
+//   0/15: o ruído próprio dela (exigido 10-21 %) já cobre o viés de layout.
+//
+// As três voltam a ser candidatas quando houver algo que as sustente — a convergência das séries de
+// carga, na primeira; uma reexecução de confirmação antes de reprovar, na segunda; um piso de
+// limiar por série, calibrado pelo viés de layout medido, na terceira. Qualquer uma delas é decisão
+// do orquestrador, não deste arquivo. Uma série só bloqueia com a medição do lado.
+
 // O que a tabela não pode deixar de ser, conferido pelo compilador. Cada condição existe por um
 // jeito concreto de o JSON sair mentindo.
 [[nodiscard]] constexpr bool esquema_coerente() noexcept {
@@ -148,6 +209,19 @@ inline constexpr Metrica kEsquemaMetricas[] = {
   }
   return true;
 }
+// A lista de bloqueantes tem as mesmas duas exigências: campos preenchidos, e grupo declarado
+// (sem grupo, `contrato_quebrado()` não teria como saber que suíte deveria tê-la produzido).
+[[nodiscard]] constexpr bool bloqueantes_coerentes() noexcept {
+  // NOLINTNEXTLINE(readability-use-anyofallof)
+  for (const SerieBloqueante& b : kSeriesBloqueantes) {
+    if (b.serie == nullptr || b.grupo == nullptr || b.rotulo == nullptr) return false;
+    if (*b.serie == '\0' || *b.grupo == '\0') return false;
+  }
+  return true;
+}
+static_assert(bloqueantes_coerentes(),
+              "bench/contrato.hpp: série bloqueante sem nome, sem grupo ou sem rótulo");
+
 static_assert(esquema_coerente(),
               "bench/contrato.hpp: métrica sem série E sem motivo, série sem grupo, quantis sem "
               "subcampos, ou série ligada a uma métrica que escreve_json ainda não sabe emitir");
@@ -172,7 +246,8 @@ static_assert(esquema_coerente(),
 
 // As séries contratuais que a execução DEVERIA ter registrado e não registrou: a suíte do grupo
 // rodou (há séries dela na lista) mas o nome do contrato não apareceu. É o caso do rename que
-// atualiza um lado só — antes desta função ele saía como métrica nula e gate verde.
+// atualiza um lado só — antes desta função ele saía como métrica nula e gate verde. Confere as
+// duas listas: as que alimentam o baseline e as que bloqueiam um PR.
 [[nodiscard]] std::vector<std::string> contrato_quebrado(const std::vector<Serie>& series);
 
 // As divergências entre as chaves de um arquivo de baseline e as deste esquema: chave contratual

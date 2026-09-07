@@ -20,7 +20,7 @@
 # path. Não pega 5 %. Não pega porque não dá: o ruído entre execuções idênticas do mesmo binário
 # chega a 10-25 % em algumas séries, e um limiar abaixo disso produz reprovação aleatória. O gate
 # exige que a diferença passe do limiar do projeto E de três vezes o ERRO PADRÃO DA MEDIANA das
-# próprias séries — que ele calcula de três execuções por lado, intercaladas.
+# próprias séries — que ele calcula de cinco execuções por lado, intercaladas.
 #
 # Medido nesta máquina com os parâmetros DESTE job — 15 rodadas de PR inocente e 5 com uma
 # regressão REAL de código (`-O0` em src/core/apply.cpp), 5 execuções por lado (bench/README.md
@@ -89,13 +89,19 @@ jobs:
           # schema 2 = o documento traz o bloco `contrato`. O número existe para que quem lê saiba
           # o que esperar do arquivo; deixá-lo em 1 depois de o CI passar a EXIGIR o bloco faria
           # "schema 1" designar duas coisas diferentes.
-          assert d["schema"] >= 2, f"schema {d['schema']}: o bloco 'contrato' entrou no schema 2"
+          assert d["schema"] >= 3, \
+              f"schema {d['schema']}: a lista 'contrato.bloqueantes' entrou no schema 3"
           assert d["carga"]["eventos"] > 0, "a carga não foi registrada"
           # O bloco `contrato` é o que diz ao relatório quais séries ele TEM de comparar e quais
           # campos definem a carga. Se ele sumir, ou apontar para uma série que não existe, o gate
           # volta a olhar para nada — e sem esta conferência faria isso em silêncio.
           nomes = {s["nome"] for s in d["series"]}
-          assert d["contrato"]["metricas"], "contrato sem métricas: nada seria exigido"
+          assert d["contrato"]["metricas"], "contrato sem métricas de baseline"
+          # `bloqueantes` é o que REPROVA um PR, e não é a mesma lista das métricas de baseline.
+          # Vazia, nada poderia reprovar — e o relatório recusaria dar veredito.
+          assert d["contrato"]["bloqueantes"], "contrato sem bloqueantes: nada poderia reprovar"
+          for b in d["contrato"]["bloqueantes"]:
+              assert b["serie"] in nomes, f"bloqueante aponta para série inexistente: {b['serie']}"
           assert d["contrato"]["campos_carga"], "contrato sem campos_carga: o relatório não teria o que conferir"
           for campo in d["contrato"]["campos_carga"]:
               assert campo in d["carga"], f"campo de carga do contrato ausente no bloco carga: {campo}"
@@ -222,7 +228,7 @@ jobs:
           estavel = sys.argv[3] != "instavel"
           serie = sys.argv[4]
           json.dump({
-            "schema": 2, "limiar_regressao_pct": 5,
+            "schema": 3, "limiar_regressao_pct": 5,
             "ambiente": {"commit": "x", "maquina": "m", "kernel": "k", "flags": "f",
                          "dispositivo_wal": "d", "valido_para_baseline": True},
             "harness": {"aquecimento": 2, "repeticoes": 7, "limiar_cv_pct": 5.0, "tentativas": 3},
@@ -234,6 +240,8 @@ jobs:
             "contrato": {"metricas": [{"chave": "nucleo.eventos_por_s_por_core",
                                        "serie": serie,
                                        "rotulo": "Eventos por segundo, por core"}],
+                         "bloqueantes": [{"serie": serie,
+                                          "rotulo": "Eventos por segundo, por core"}],
                          "campos_carga": ["dias", "negocios_por_dia", "investidores",
                                           "particoes", "semente"]},
             "metricas": {}, "metricas_ausentes": {},
@@ -344,6 +352,14 @@ jobs:
           python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/fora-contrato.json" \
             --contra "$RUNNER_TEMP/fora-contrato-base.json" --saida /dev/null
           test $? -eq 0 || { echo "::error::série fora do contrato reprovou o PR"; exit 1; }
+
+          # P1: `--exigir` SEM VALORES zera a lista do que pode reprovar. Com uma queda de 50 %
+          # no lado do PR, o veredito tem de ser "não dá para dizer" (2) — nunca verde. É o mesmo
+          # ramo do JSON sem contrato: sem lista do que exigir, "sem regressão" é afirmação sobre
+          # coisa nenhuma. `--exigir $VAR` com a variável vazia produz este estado sem aviso.
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruim.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null --exigir
+          test $? -eq 2 || { echo "::error::--exigir sem valores deu veredito sobre lista vazia"; exit 1; }
 
           # JSON sem contrato e sem --exigir não pode dar veredito verde: nada seria exigido.
           python3 - "$RUNNER_TEMP/sem-contrato.json" "$RUNNER_TEMP/base.json" <<'PY'
