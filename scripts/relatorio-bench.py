@@ -474,7 +474,11 @@ def secao_resumo(doc, cabeca, linhas, fora, tem_base, frase, cegas, saida):
             f"negócios por dia e {carga['investidores']} investidores, {carga['eventos']} eventos "
             "no total."
         )
-    if cegas:
+    # Só quando HOUVE comparação. Sem base não existe veredito para a série não falar por ele, nem
+    # job para reprovar: a frase saía numa medição avulsa dizendo "o job reprova por isso" logo
+    # abaixo da tabela onde a série aparece medida e sadia. Aviso que descreve uma situação que não
+    # é a do documento é a mesma classe de defeito que este relatório existe para não cometer.
+    if cegas and tem_base:
         saida.append(
             "\n> **Atenção:** "
             + ", ".join(f"`{n}`" for n in cegas)
