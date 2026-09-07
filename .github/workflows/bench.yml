@@ -1,0 +1,522 @@
+# Medição do motor-rv como passo de verificação.
+#
+# ---------------------------------------------------------------------------------------------
+# POR QUE ESTE WORKFLOW NÃO COMPARA COM `bench/baseline.json`
+#
+# `bench/baseline.json` é fixado na máquina de referência (docs/ambiente.md, ADR-0022) e só vale
+# lá. Um runner do GitHub tem outra CPU, outro disco e vizinhos barulhentos: comparado com aquele
+# baseline, todo PR reprovaria por diferença de hardware. Um gate que reprova por motivo errado é
+# desligado com raiva em três meses, e junto com ele vai o gate que funcionava.
+#
+# O que dá para verificar num runner compartilhado é OUTRA pergunta, e ela é a que interessa num
+# PR: "este código está mais lento que a base?". A resposta vem de medir OS DOIS LADOS NA MESMA
+# EXECUÇÃO, no mesmo runner, minutos um do outro — o único arranjo em que a comparação isola a
+# mudança de código do hardware.
+#
+# ---------------------------------------------------------------------------------------------
+# O QUE ESTE GATE PEGA, E O QUE ELE NÃO PEGA
+#
+# Ele pega REGRESSÃO GROSSA: um fator, um O(n²) acidental, uma alocação que voltou para o hot
+# path. Não pega 5 %. Não pega porque não dá: o ruído entre execuções idênticas do mesmo binário
+# chega a 10-25 % em algumas séries, e um limiar abaixo disso produz reprovação aleatória. O gate
+# exige que a diferença passe do limiar do projeto E de três vezes o ERRO PADRÃO DA MEDIANA das
+# próprias séries — que ele calcula de cinco execuções por lado, intercaladas.
+#
+# Medido nesta máquina com os parâmetros DESTE job — 15 rodadas de PR inocente e 5 com uma
+# regressão REAL de código (`-O0` em src/core/apply.cpp), 5 execuções por lado (bench/README.md
+# traz a tabela): fechamento 15/15 nas duas contratuais, vermelho falso 0/15, cegueira 0/15, e a
+# regressão real reprovada 5/5. Antes de B1 o fechamento era 6/15 e 5/15 e o portão passava 12/15
+# das rodadas sem olhar métrica contratual nenhuma — é por isso que o código 2 do relatório passou
+# de aviso a REPROVAÇÃO.
+#
+# O gate de 5 % existe, mas é outro: `motor-rv-bench --comparar bench/baseline.json`, rodado por
+# `desempenho` na máquina de referência. Os dois são complementares e nenhum substitui o outro.
+
+name: bench
+
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      negocios:
+        description: "negócios por pregão"
+        default: "5000"
+      investidores:
+        description: "investidores"
+        default: "500"
+      dias:
+        description: "pregões"
+        default: "1"
+      repeticoes:
+        description: "repetições por série"
+        default: "9"
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEPS: >-
+    ninja-build cmake liburing-dev libssl-dev libfmt-dev libzstd-dev
+    libgtest-dev libgmock-dev python3
+
+jobs:
+  # --------------------------------------------------------------------------------------------
+  # 1. O harness funciona? Nada aqui depende de quão rápido é o runner — são verificações de
+  #    COMPORTAMENTO, com veredito determinístico.
+  verificacao:
+    name: o harness e o comparador funcionam
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: dependências
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends $DEPS
+      - run: cmake --preset release && cmake --build --preset release
+
+      - name: o harness roda e produz o JSON no esquema certo
+        run: |
+          ./build/release/bench/motor-rv-bench --rapido --silencioso \
+            --negocios 2000 --investidores 300 --dir-wal "$RUNNER_TEMP" \
+            --out "$RUNNER_TEMP/medicao.json"
+          python3 - "$RUNNER_TEMP/medicao.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          for chave in ("schema", "ambiente", "harness", "carga", "contrato", "metricas",
+                        "metricas_ausentes", "series"):
+              assert chave in d, f"falta '{chave}' no JSON da medição"
+          # schema 2 = o documento traz o bloco `contrato`. O número existe para que quem lê saiba
+          # o que esperar do arquivo; deixá-lo em 1 depois de o CI passar a EXIGIR o bloco faria
+          # "schema 1" designar duas coisas diferentes.
+          assert d["schema"] >= 3, \
+              f"schema {d['schema']}: a lista 'contrato.bloqueantes' entrou no schema 3"
+          assert d["carga"]["eventos"] > 0, "a carga não foi registrada"
+          # O bloco `contrato` é o que diz ao relatório quais séries ele TEM de comparar e quais
+          # campos definem a carga. Se ele sumir, ou apontar para uma série que não existe, o gate
+          # volta a olhar para nada — e sem esta conferência faria isso em silêncio.
+          nomes = {s["nome"] for s in d["series"]}
+          assert d["contrato"]["metricas"], "contrato sem métricas de baseline"
+          # `bloqueantes` é o que REPROVA um PR, e não é a mesma lista das métricas de baseline.
+          # Vazia, nada poderia reprovar — e o relatório recusaria dar veredito.
+          assert d["contrato"]["bloqueantes"], "contrato sem bloqueantes: nada poderia reprovar"
+          for b in d["contrato"]["bloqueantes"]:
+              assert b["serie"] in nomes, f"bloqueante aponta para série inexistente: {b['serie']}"
+          assert d["contrato"]["campos_carga"], "contrato sem campos_carga: o relatório não teria o que conferir"
+          for campo in d["contrato"]["campos_carga"]:
+              assert campo in d["carga"], f"campo de carga do contrato ausente no bloco carga: {campo}"
+          for c in d["contrato"]["metricas"]:
+              assert c["serie"] in nomes, f"contrato aponta para série inexistente: {c['serie']}"
+              assert d["metricas"].get(c["chave"], "ausente") != "ausente", \
+                  f"a chave {c['chave']} do contrato não saiu em 'metricas'"
+          assert len(d["series"]) >= 15, f"séries de menos: {len(d['series'])}"
+          # Série pulada sem motivo é relatório mentindo por omissão.
+          for s in d["series"]:
+              assert s["medida"] or s["nota"], f"série pulada sem motivo: {s['nome']}"
+          # Medida com valor 0 não existe mais: o corpo devolve `Amostra{0, dt}` quando a operação
+          # medida FALHA, e zero numa forma de duração é o melhor resultado possível — a série
+          # saía estável, virava "-100% — melhor" no resumo e podia virar baseline. O harness
+          # agora marca a série como não medida; esta linha é o invariante correspondente.
+          for s in d["series"]:
+              assert not s["medida"] or s["mediana"] > 0, \
+                  f"série medida com valor zero: {s['nome']}"
+          print(f"ok: {len(d['series'])} séries, {d['carga']['eventos']} eventos")
+          PY
+
+      # `bench/baseline.json` é versionado à mão, e era a QUARTA cópia da tabela de métricas:
+      # renomear uma chave só lá fazia o comparador procurar o que não existe, imprimir
+      # "SEM BASELINE" e sair 0. Este passo confronta as chaves do arquivo com bench/contrato.hpp.
+      - name: o baseline versionado bate com o esquema
+        run: |
+          ./build/release/bench/motor-rv-bench --conferir-esquema bench/baseline.json
+          sed 's/"nucleo.eventos_por_s_por_core"/"nucleo.renomeada_a_mao"/' bench/baseline.json \
+            > "$RUNNER_TEMP/baseline-divergente.json"
+          set +e
+          ./build/release/bench/motor-rv-bench --conferir-esquema "$RUNNER_TEMP/baseline-divergente.json"
+          test $? -ne 0 || { echo "::error::a conferência de esquema aceitou uma chave renomeada"; exit 1; }
+          set -e
+          echo "o esquema do baseline é conferido, e uma chave renomeada reprova"
+
+      # O comparador tem de saber dizer NÃO. Dois baselines sintéticos, um que nenhuma máquina
+      # reprova e um que nenhuma máquina aprova: o veredito não depende da velocidade do runner.
+      - name: o comparador reprova regressão e recusa carga diferente
+        run: |
+          carga='"carga": { "dias": 1, "negocios_por_dia": 2000, "investidores": 300,
+                            "particoes": 1, "semente": 20260902, "eventos": 0 },'
+          cat > "$RUNNER_TEMP/frouxo.json" <<FIM
+          { "schema": 2, "limiar_regressao_pct": 5, $carga
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
+          FIM
+          cat > "$RUNNER_TEMP/apertado.json" <<FIM
+          { "schema": 2, "limiar_regressao_pct": 5, $carga
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000000000.0 } }
+          FIM
+          cat > "$RUNNER_TEMP/outra-carga.json" <<FIM
+          { "schema": 2, "limiar_regressao_pct": 5,
+            "carga": { "dias": 99, "negocios_por_dia": 2000, "investidores": 300,
+                       "particoes": 1, "semente": 20260902, "eventos": 0 },
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000.0 } }
+          FIM
+          # `--limiar-cv 1000` aceita qualquer dispersão como estável. Não é para maquiar a
+          # medição: este job responde "o comparador funciona?", e a resposta não pode depender de
+          # o runner ter ficado ocupado. Sem isto, uma série instável sai como NÃO COMPARADA
+          # (código 6) e o passo falha por ruído — que é o que aconteceu ao rodar este job cinco
+          # vezes seguidas.
+          comum="--rapido --limiar-cv 1000 --silencioso --suites nucleo
+                 --negocios 2000 --investidores 300"
+
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/frouxo.json"
+          echo "baseline frouxo: aprovou, como devia"
+
+          set +e
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/apertado.json"
+          test $? -eq 3 || { echo "::error::o comparador NÃO reprovou uma regressão de 1000x"; exit 1; }
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/outra-carga.json"
+          test $? -eq 4 || { echo "::error::o comparador comparou cargas diferentes"; exit 1; }
+          # Regressão contra um baseline SEM bloco `carga` continua sendo 3. Enquanto os códigos
+          # eram atribuídos em `if`s independentes, o 5 sobrescrevia o 3 e toda regressão medida
+          # contra um baseline antigo virava "não conferi a carga" — com REGRESSÃO no stdout.
+          cat > "$RUNNER_TEMP/apertado-sem-carga.json" <<FIM
+          { "schema": 2, "limiar_regressao_pct": 5,
+            "metricas": { "nucleo.eventos_por_s_por_core": 1000000000.0 } }
+          FIM
+          ./build/release/bench/motor-rv-bench $comum --comparar "$RUNNER_TEMP/apertado-sem-carga.json"
+          test $? -eq 3 || { echo "::error::o 5 (carga não conferida) mascarou o 3 (regressão)"; exit 1; }
+
+          # Métrica contratual sem número no baseline: 6, não 0. "Nada a comparar" não é aprovação.
+          ./build/release/bench/motor-rv-bench $comum --comparar bench/baseline.json
+          test $? -eq 6 || { echo "::error::métrica contratual sem baseline não produziu código 6"; exit 1; }
+          set -e
+          echo "o comparador reprova regressão (3), recusa carga diferente (4), não deixa o 5"\
+               " mascarar o 3, e sai 6 quando a métrica contratual não tem número no baseline"
+
+      # Medir com o preset errado é o erro que contamina todos os PRs seguintes, e ele não dá
+      # sintoma: o número simplesmente fica menor.
+      - name: o harness recusa gravar baseline fora do release
+        run: |
+          cmake --preset debug && cmake --build --preset debug
+          set +e
+          ./build/debug/bench/motor-rv-bench --rapido --silencioso --suites nucleo \
+            --negocios 500 --investidores 100 \
+            --gravar-baseline "$RUNNER_TEMP/nao-deve-existir.json"
+          test $? -ne 0 || { echo "::error::o harness gravou baseline a partir do preset debug"; exit 1; }
+          set -e
+          test ! -f "$RUNNER_TEMP/nao-deve-existir.json" \
+            || { echo "::error::o arquivo foi criado apesar da recusa"; exit 1; }
+
+          # E a outra porta: `--limiar-cv` alto faz toda série sair "estável" e esvazia a recusa
+          # por instabilidade que o README promete sem condição.
+          set +e
+          ./build/release/bench/motor-rv-bench --rapido --limiar-cv 1000 --silencioso \
+            --suites nucleo --negocios 500 --investidores 100 \
+            --gravar-baseline "$RUNNER_TEMP/tambem-nao.json"
+          test $? -ne 0 || { echo "::error::gravou baseline com --limiar-cv afrouxado"; exit 1; }
+          set -e
+          test ! -f "$RUNNER_TEMP/tambem-nao.json" \
+            || { echo "::error::o arquivo foi criado apesar da recusa"; exit 1; }
+          echo "gravar-baseline recusa preset errado e limiar de CV afrouxado"
+
+      # O gerador de relatório é código de gate: ele decide se um PR passa. Código de gate que
+      # ninguém executa apodrece igual a qualquer outro, e este é testado contra dados sintéticos
+      # para que o resultado não dependa da máquina.
+      - name: o gerador de relatório detecta regressão e ignora ruído
+        run: |
+          gera() {  # $1 = arquivo, $2 = fator na vazão, $3 = "instavel"|"", $4 = nome da série
+            python3 - "$1" "$2" "${3:-estavel}" "${4:-nucleo.loop.eventos_por_s_por_core}" <<'PY'
+          import json, sys
+          fator = float(sys.argv[2])
+          estavel = sys.argv[3] != "instavel"
+          serie = sys.argv[4]
+          json.dump({
+            "schema": 3, "limiar_regressao_pct": 5,
+            "ambiente": {"commit": "x", "maquina": "m", "kernel": "k", "flags": "f",
+                         "dispositivo_wal": "d", "valido_para_baseline": True},
+            "harness": {"aquecimento": 2, "repeticoes": 7, "limiar_cv_pct": 5.0, "tentativas": 3},
+            "carga": {"dias": 1, "negocios_por_dia": 1, "investidores": 1, "particoes": 1,
+                      "semente": 1, "eventos": 1},
+            # O bloco `contrato` é de onde o relatório tira as séries que TEM de comparar (o
+            # harness o emite de bench/contrato.hpp). Sem ele aqui, o teste exercitaria um
+            # caminho que a produção não usa.
+            "contrato": {"metricas": [{"chave": "nucleo.eventos_por_s_por_core",
+                                       "serie": serie,
+                                       "rotulo": "Eventos por segundo, por core"}],
+                         "bloqueantes": [{"serie": serie,
+                                          "rotulo": "Eventos por segundo, por core"}],
+                         "campos_carga": ["dias", "negocios_por_dia", "investidores",
+                                          "particoes", "semente"]},
+            "metricas": {}, "metricas_ausentes": {},
+            "series": [{"nome": serie, "grupo": "nucleo",
+                        "unidade": "ops/s", "direcao": "maior_melhor", "medida": True,
+                        "estavel": estavel, "mediana": 1000000.0 * fator, "cv_pct": 1.0,
+                        "amostras": [1000000.0 * fator] * 7}],
+          }, open(sys.argv[1], "w"))
+          PY
+          }
+          gera "$RUNNER_TEMP/base.json" 1.00
+          gera "$RUNNER_TEMP/igual.json" 1.00
+          gera "$RUNNER_TEMP/ruido.json" 0.97   # 3 %: dentro do limiar, não é regressão
+          gera "$RUNNER_TEMP/ruim.json"  0.50   # metade: é
+
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/igual.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruido.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          echo "3 % não é regressão, como devia"
+
+          set +e
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruim.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 1 || { echo "::error::o relatório não reprovou uma queda de 50%"; exit 1; }
+
+          # Uma série contratual que não pôde ser comparada tem de sair como 2 — nem 0 (passou
+          # calado sobre a métrica que mais importa) nem 1 (não houve regressão; houve cegueira).
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/igual.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null --exigir serie.que.nao.existe
+          test $? -eq 2 || { echo "::error::série exigida ausente não produziu código 2"; exit 1; }
+
+          # A lista de séries obrigatórias tem de vir do bloco `contrato` do JSON, e este caso é o
+          # que distingue isso de um default digitado no script: a série se chama OUTRA coisa nos
+          # dois lados, e o contrato aponta para ela. Derivando do contrato, a série é comparada e
+          # o resultado é 0; com o default antigo (`nucleo.loop.eventos_por_s_por_core`) o script
+          # procuraria um nome inexistente e sairia 2. O caso anterior a este — com o mesmo nome
+          # nos dois lados — passava dos dois jeitos e não provava nada.
+          gera "$RUNNER_TEMP/base-outronome.json" 1.00 estavel outro.nome.de.serie
+          gera "$RUNNER_TEMP/pr-outronome.json"   1.00 estavel outro.nome.de.serie
+          set +e
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/pr-outronome.json" \
+            --contra "$RUNNER_TEMP/base-outronome.json" --saida /dev/null
+          test $? -eq 0 || { echo "::error::a lista de exigidas não veio do contrato do JSON"; exit 1; }
+
+          # Série marcada INSTÁVEL pelo harness continua sendo COMPARADA: `estavel` decide se um
+          # número vira baseline, não se dois números podem ser confrontados. Usá-la como porta de
+          # entrada fechava o portão A/B (medido: 0/5 de fechamento) e o job só avisava.
+          gera "$RUNNER_TEMP/instavel.json" 1.00 instavel
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/instavel.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 0 || { echo "::error::série instável ficou de fora da comparação A/B"; exit 1; }
+
+          # E uma regressão de 2× numa série instável tem de ser vista assim mesmo.
+          gera "$RUNNER_TEMP/instavel-ruim.json" 0.50 instavel
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/instavel-ruim.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 1 || { echo "::error::regressão de 2x numa série instável não foi vista"; exit 1; }
+
+          # R4: um PR que RENOMEIA a série contratual (no contrato e no ponto de registro, de forma
+          # consistente) deixa a base sem o nome novo. Série nova não reprova — mas se NENHUMA
+          # contratual foi comparada, o veredito não pode ser verde: seria o portão aprovando sem
+          # ter comparado nada, que é o defeito de origem desta rodada inteira entrando por outra
+          # porta.
+          gera "$RUNNER_TEMP/renomeada.json" 1.00 estavel nucleo.loop.com_outro_nome
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/renomeada.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 2 || { echo "::error::rename de todas as contratuais deu veredito verde"; exit 1; }
+
+          # R2: ruído acima do teto não é aprovação. Um limiar maior que a regressão de 2x que
+          # este gate promete pegar não decide nada — e dizer "sem regressão" ali é vista grossa.
+          gera "$RUNNER_TEMP/ruidoso-base.json" 1.00 estavel
+          gera "$RUNNER_TEMP/ruidoso-pr.json"   0.20 estavel
+          python3 - "$RUNNER_TEMP/ruidoso-base.json" "$RUNNER_TEMP/ruidoso-pr.json" <<'PY'
+          import json, sys
+          for caminho in sys.argv[1:]:
+              d = json.load(open(caminho))
+              for s in d["series"]:
+                  s["cv_pct"] = 200.0            # ruído que engole qualquer diferença
+                  s["amostras"] = [s["mediana"]] * 7
+              json.dump(d, open(caminho, "w"))
+          PY
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruidoso-pr.json" \
+            --contra "$RUNNER_TEMP/ruidoso-base.json" --saida /dev/null
+          test $? -eq 2 || { echo "::error::queda de 80% com ruído de 200% não virou 'não decide'"; exit 1; }
+
+          # R3: série FORA do contrato não vota. Ela aparece no relatório como informativa; medido
+          # em 15 rodadas de PR inocente, deixá-la votar dava vermelho falso.
+          python3 - "$RUNNER_TEMP/base.json" "$RUNNER_TEMP/fora-contrato.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          s = dict(d["series"][0])
+          s["nome"] = "nucleo.serie.que.nao.e.contratual"
+          s["mediana"] *= 0.4
+          s["amostras"] = [s["mediana"]] * 7
+          d["series"] = d["series"] + [s]
+          json.dump(d, open(sys.argv[2], "w"))
+          PY
+          python3 - "$RUNNER_TEMP/base.json" "$RUNNER_TEMP/fora-contrato-base.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          s = dict(d["series"][0])
+          s["nome"] = "nucleo.serie.que.nao.e.contratual"
+          s["amostras"] = [s["mediana"]] * 7
+          d["series"] = d["series"] + [s]
+          json.dump(d, open(sys.argv[2], "w"))
+          PY
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/fora-contrato.json" \
+            --contra "$RUNNER_TEMP/fora-contrato-base.json" --saida /dev/null
+          test $? -eq 0 || { echo "::error::série fora do contrato reprovou o PR"; exit 1; }
+
+          # P1: `--exigir` SEM VALORES zera a lista do que pode reprovar. Com uma queda de 50 %
+          # no lado do PR, o veredito tem de ser "não dá para dizer" (2) — nunca verde. É o mesmo
+          # ramo do JSON sem contrato: sem lista do que exigir, "sem regressão" é afirmação sobre
+          # coisa nenhuma. `--exigir $VAR` com a variável vazia produz este estado sem aviso.
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/ruim.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null --exigir
+          test $? -eq 2 || { echo "::error::--exigir sem valores deu veredito sobre lista vazia"; exit 1; }
+
+          # JSON sem contrato e sem --exigir não pode dar veredito verde: nada seria exigido.
+          python3 - "$RUNNER_TEMP/sem-contrato.json" "$RUNNER_TEMP/base.json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[2]))
+          d.pop("contrato")
+          json.dump(d, open(sys.argv[1], "w"))
+          PY
+          python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/sem-contrato.json" \
+            --contra "$RUNNER_TEMP/base.json" --saida /dev/null
+          test $? -eq 2 || { echo "::error::JSON sem contrato deu veredito verde"; exit 1; }
+          set -e
+          echo "exigidas vêm do contrato; série instável é comparada; regressão de 2x vista;"\
+               " rename de todas as contratuais, ruído acima do teto e JSON sem contrato não"\
+               " ficam verdes; série fora do contrato não vota"
+
+  # --------------------------------------------------------------------------------------------
+  # 2. A medição em si, com relatório. Em PR, também compara com a base no MESMO runner.
+  medicao:
+    name: medição e relatório
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cabeca
+
+      # A base entra como segunda cópia da árvore. Só em PR: num push não existe "o outro lado".
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: dependências
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends $DEPS
+
+      - name: compilar os dois lados
+        id: compila
+        run: |
+          cmake --preset release -S cabeca -B cabeca/build/release > /dev/null
+          cmake --build cabeca/build/release --target motor-rv-bench
+          echo "comparavel=nao" >> "$GITHUB_OUTPUT"
+
+          test -f base/bench/CMakeLists.txt || {
+            echo "::notice::a base não tem bench/ — só a medição deste commit será publicada"
+            exit 0
+          }
+          # A carga é gerada dos CSVs de data/. Se os dois lados tiverem calendários ou tabelas de
+          # instrumentos diferentes, os dois lados medem sessões diferentes e a comparação não
+          # significa nada — é o mesmo motivo pelo qual o comparador recusa cargas diferentes.
+          diff -r cabeca/data base/data > /dev/null || {
+            echo "::warning::data/ difere entre a base e este PR — comparação desligada"
+            exit 0
+          }
+          cmake --preset release -S base -B base/build/release > /dev/null
+          cmake --build base/build/release --target motor-rv-bench
+          echo "comparavel=sim" >> "$GITHUB_OUTPUT"
+
+      # CINCO execuções por lado, INTERCALADAS. Intercalar controla a deriva do runner: se a
+      # máquina fica lenta no meio, ela fica lenta para os dois. Mais de uma, porque é de onde sai
+      # a estimativa de ruído ENTRE execuções — que é a maior das duas e a que decide o limiar de
+      # cada série.
+      #
+      # Cinco, e não três, por medição: com três, o limiar exigido das séries contratuais ia a
+      # 53,8 % em 15 rodadas de PR inocente e estourava o teto de 50 % em 3 delas — o gate ficava
+      # cego (código 2, que reprova) sem que ninguém tivesse mudado código. Com cinco, a mesma
+      # distribuição cai para 9,3–31,5 % e 6,6–31,2 %, inteiramente abaixo do teto: 15/15 verdes,
+      # nenhum vermelho falso, nenhuma cegueira. O erro padrão da mediana encolhe com √n, e este é
+      # o n que compra o teto. Custa quatro execuções de ~5 s contra duas compilações.
+      - name: medir
+        env:
+          NEGOCIOS: ${{ github.event.inputs.negocios || '5000' }}
+          INVESTIDORES: ${{ github.event.inputs.investidores || '500' }}
+          DIAS: ${{ github.event.inputs.dias || '1' }}
+          REPETICOES: ${{ github.event.inputs.repeticoes || '9' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/med"
+          # A suíte `wal` fica de fora da comparação: o disco de um runner compartilhado não é
+          # comparável consigo mesmo entre duas execuções, e uma série que oscila 10x arrasta o
+          # relatório inteiro. Ela é medida no passo seguinte, como informação, não como gate.
+          comum="--silencioso --suites base,nucleo,snapshot --repeticoes $REPETICOES
+                 --dias $DIAS --negocios $NEGOCIOS --investidores $INVESTIDORES"
+          # Cada lado roda COM O CWD NA SUA PRÓPRIA ÁRVORE. Não é detalhe: o harness identifica o
+          # commit com `git rev-parse HEAD` no diretório corrente, e rodando da raiz do workspace
+          # — que não é repositório nenhum — os dois JSONs saíam com `commit: desconhecido`. Um
+          # relatório de comparação que não diz o que comparou não serve para nada.
+          for i in 1 2 3 4 5; do
+            ( cd cabeca && ./build/release/bench/motor-rv-bench $comum \
+                --out "$RUNNER_TEMP/med/cabeca$i.json" )
+            if [ "${{ steps.compila.outputs.comparavel }}" = "sim" ]; then
+              ( cd base && ./build/release/bench/motor-rv-bench $comum \
+                  --out "$RUNNER_TEMP/med/base$i.json" )
+            fi
+          done
+
+      # O WAL contra o disco do runner: informação, nunca gate. Vai para o relatório porque a
+      # forma da curva (4 KiB vs 64 KiB vs 256 KiB) é o que sustenta a hipótese do group commit,
+      # e ela aparece mesmo num disco ruim.
+      - name: medir o WAL (informativo)
+        continue-on-error: true
+        run: |
+          cd cabeca && ./build/release/bench/motor-rv-bench --silencioso --suites wal \
+            --repeticoes 7 --dir-wal "$RUNNER_TEMP" --out "$RUNNER_TEMP/med/wal.json"
+
+      - name: gerar o relatório
+        id: relatorio
+        run: |
+          cd cabeca
+          args="--medicao $RUNNER_TEMP/med/cabeca1.json $RUNNER_TEMP/med/cabeca2.json $RUNNER_TEMP/med/cabeca3.json $RUNNER_TEMP/med/cabeca4.json $RUNNER_TEMP/med/cabeca5.json"
+          if [ "${{ steps.compila.outputs.comparavel }}" = "sim" ]; then
+            args="$args --contra $RUNNER_TEMP/med/base1.json $RUNNER_TEMP/med/base2.json $RUNNER_TEMP/med/base3.json $RUNNER_TEMP/med/base4.json $RUNNER_TEMP/med/base5.json"
+            titulo="Medição — ${{ github.sha }} contra a base"
+          else
+            titulo="Medição — ${{ github.sha }}"
+          fi
+          # 0 = sem regressão; 1 = regressão; 2 = uma série contratual não pôde ser comparada
+          # (ficou instável de algum lado). O 2 não reprova — mas também não passa calado.
+          set +e
+          python3 scripts/relatorio-bench.py $args --titulo "$titulo" \
+            --saida "$RUNNER_TEMP/med/relatorio.md"
+          echo "regressao=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+          # A suíte de WAL pode ter falhado (o passo é `continue-on-error`): o relatório principal
+          # não pode depender dela. `|| true` no python E a existência do arquivo conferida antes
+          # do `cat` — sem as duas, um disco ruim derruba o relatório inteiro.
+          if [ -f "$RUNNER_TEMP/med/wal.json" ]; then
+            python3 scripts/relatorio-bench.py --medicao "$RUNNER_TEMP/med/wal.json" \
+              --apendice --titulo "WAL no disco do runner (informativo, não é gate)" \
+              --saida "$RUNNER_TEMP/med/relatorio-wal.md" || true
+            if [ -f "$RUNNER_TEMP/med/relatorio-wal.md" ]; then
+              cat "$RUNNER_TEMP/med/relatorio-wal.md" >> "$RUNNER_TEMP/med/relatorio.md"
+            fi
+          fi
+          cat "$RUNNER_TEMP/med/relatorio.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: medicao-${{ github.run_id }}
+          path: ${{ runner.temp }}/med/
+          retention-days: 30
+
+      - name: veredito
+        run: |
+          if [ "${{ steps.compila.outputs.comparavel }}" != "sim" ]; then
+            echo "sem base comparável: relatório publicado, sem veredito de regressão"
+            exit 0
+          fi
+          case "${{ steps.relatorio.outputs.regressao }}" in
+            0) echo "nenhuma regressão acima do ruído" ;;
+            # O 2 REPROVA desde a devolução do verificador. Ele deixou de significar "o runner
+            # estava barulhento" — série instável agora é comparada — e passou a significar que
+            # uma métrica que os DOIS lados têm não foi confrontada. Um gate cego que só avisa é
+            # um gate que se aprende a ignorar, e era o estado deste: 5 em 5 execuções de um PR
+            # inocente saíam com aviso e nenhuma métrica contratual comparada.
+            2) echo "::error::uma métrica contratual não foi comparada — veja o resumo do job"
+               exit 1 ;;
+            *) echo "::error::regressão de desempenho acima do ruído — veja o resumo do job"
+               exit 1 ;;
+          esac

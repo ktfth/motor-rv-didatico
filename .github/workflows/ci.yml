@@ -4,6 +4,11 @@
 # comando. Um gate que ninguém roda não é gate — e uma revisão independente mostrou dois que
 # reportavam VERDE sem ter feito nada (LTO nunca ligava; o preset tsan selecionava zero testes).
 # Por isso o CI não só roda: ele confere que os gates fizeram alguma coisa.
+#
+# A MEDIÇÃO não mora aqui: ela tem workflow próprio (`.github/workflows/bench.yml`), porque roda
+# duas árvores, publica relatório e tem regra de veredito própria. Correção e desempenho falham
+# por motivos diferentes e em ritmos diferentes; misturá-los faria um teste quebrado e um
+# benchmark barulhento aparecerem como a mesma coisa vermelha.
 
 name: ci
 

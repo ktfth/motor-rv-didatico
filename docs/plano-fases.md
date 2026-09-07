@@ -34,8 +34,12 @@ Saída: I8–I12 com teste; suíte de crash verde; `bench/baseline.json` preench
 aprovado.
 Status: **em andamento**. Já entregues: loop single-writer com SPSC ring (2 M mensagens/28 ms sem
 erro de ordem), `apply` para todos os eventos de negócio, imagem de recuperação por stall-and-copy
-com I11 verificado em seis pontos de corte, portão de saída de I10 com contrapressão. Pendentes:
-WAL completo (formato, group commit, io_uring, recuperação), suíte de crash e baseline.
+com I11 verificado em seis pontos de corte, portão de saída de I10 com contrapressão, e o
+**harness de medição** de ADR-0021 (`bench/`, com comparador de regressão e job de CI próprio;
+primeira medição em `bench/reports/2026-09-06-medicao-inicial.md`). Pendentes: WAL completo
+(formato, group commit, io_uring, recuperação), suíte de crash e **fixar** `bench/baseline.json`
+na máquina de referência — o harness já faz isso em um comando, mas ADR-0022 proíbe promover
+número medido em outra máquina.
 
 ## Fase 3 — liquidação e eventos corporativos
 Entram: dominio-pos-negociacao → nucleo → verificador.

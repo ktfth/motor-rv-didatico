@@ -123,3 +123,42 @@ function(motor_rv_test nome)
     set_tests_properties(${nome} PROPERTIES LABELS "${T_ROTULOS}")
   endif()
 endfunction()
+
+# ------------------------------------------------- flags do harness de medição
+# `motor_rv::medicao` — mesma ISA e mesma otimização do hot path, mas COM exceções.
+#
+# Por que não reusar `motor_rv::hot`: o harness de bench compila, dentro das SUAS unidades de
+# compilação, código que só existe em cabeçalho do hot path — `SpscRing`, `DenseIndex`, `Fixed`,
+# `Histogram`, o `poll` da partição. Medi-las com uma ISA diferente da de produção mediria outro
+# binário, e o número iria para `bench/baseline.json` como se fosse do motor.
+#
+# Por que não `-fno-exceptions`: o driver do harness lê CSV, monta JSON e formata texto — ele não
+# está no caminho medido. A regra de CODING_RULES §4 vale para o hot path; aplicá-la ao driver
+# seria restrição sem contrapartida, e o `rv_ingress`, que o harness usa para gerar a carga, é
+# justamente a camada que precisa de exceções (foi o achado 7 do HANDOFF).
+#
+# O que este alvo NÃO faz: mudar a política. Ele é `motor_rv::hot` menos uma flag, e a razão de
+# a diferença ser exatamente essa está escrita acima.
+add_library(motor_rv_medicao INTERFACE)
+add_library(motor_rv::medicao ALIAS motor_rv_medicao)
+target_link_libraries(motor_rv_medicao INTERFACE motor_rv::flags)
+
+if(MOTOR_RV_ARCH STREQUAL "native")
+  target_compile_options(motor_rv_medicao INTERFACE -march=native)
+elseif(MOTOR_RV_ARCH)
+  target_compile_options(motor_rv_medicao INTERFACE -march=${MOTOR_RV_ARCH})
+endif()
+
+target_compile_options(motor_rv_medicao INTERFACE $<$<CONFIG:Release>:-O3>)
+
+# O harness precisa saber, EM TEMPO DE EXECUÇÃO, com que flags ele mesmo foi compilado: é o bloco
+# `ambiente` de bench/baseline.json (ADR-0021), e é o que impede comparar número de `release` com
+# número de `nativo`. Passar isto por define é o único jeito de a resposta não depender de alguém
+# lembrar de digitá-la no relatório.
+target_compile_definitions(motor_rv_medicao INTERFACE
+  MOTOR_RV_ARCH_STR="${MOTOR_RV_ARCH}"
+  MOTOR_RV_BUILD_TYPE_STR="$<CONFIG>"
+  MOTOR_RV_SANITIZER_STR="${MOTOR_RV_SANITIZER}"
+  MOTOR_RV_LTO_ON=$<BOOL:${MOTOR_RV_LTO}>
+  MOTOR_RV_COMPILER_STR="${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
+)
