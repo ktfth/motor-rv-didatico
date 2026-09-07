@@ -32,6 +32,7 @@ ADR aceito é imutável (hook). Para mudar uma decisão: ADR novo com 'substitui
 | ADR-0024 | [Backend de I/O híbrido: `WalT<B>` por template, base virtual só para os testes](0024-io-backend-hibrido.md) — substitui a mecânica de ADR-0023 |
 | ADR-0026 | [Uma tabela só de métricas para o harness, o comparador e o relatório](0026-contrato-unico-de-metricas.md) |
 | ADR-0027 | [O gate de regressão em CI compara os dois lados na mesma execução, com limiar calibrado pelo ruído medido](0027-criterio-de-ruido-do-gate-ab.md) |
+| ADR-0028 | [Quem reprova um PR é um conjunto declarado, separado das métricas de baseline](0028-quem-reprova-um-pr.md) |
 
 ## Nota sobre 0017–0023
 

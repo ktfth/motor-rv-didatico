@@ -23,8 +23,9 @@ mesma coisa vermelha:
 - `.github/workflows/ci.yml` — matriz de presets, os gates do projeto e o clang-tidy.
 - `.github/workflows/bench.yml` — medição. O job `verificacao` prova que o harness e o comparador
   funcionam (veredito determinístico, sem depender da velocidade do runner); o job `medicao`
-  compila as DUAS árvores de um PR e mede os dois lados intercalados, três vezes cada, no mesmo
-  runner, publicando o relatório no resumo do job e nos artefatos.
+  compila as DUAS árvores de um PR e mede os dois lados intercalados, **cinco vezes cada**, no
+  mesmo runner, publicando o relatório no resumo do job e nos artefatos. O critério de regressão e
+  quem pode reprovar estão em ADR-0027 e ADR-0028, com os números que os calibraram.
 
 ```sh
 ./scripts/bootstrap-toolchain.sh && export PATH="$PWD/.toolchain/bin:$PATH"
@@ -50,7 +51,8 @@ imagem de recuperação. Mesma semente, mesmo resultado.
 | `src/app/` | `motor-rv-sim` |
 | `src/wal/` | **parcial**: formato (`WalHdr` 32 B, `SegmentHdr`), descoberta de alinhamento via `statx` com fallback, três backends de I/O (io_uring, pwrite, injeção de falhas) |
 | `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes |
-| `scripts/relatorio-bench.py` | relatório Markdown da medição e, com dois lados, o veredito de regressão do workflow `bench` — com limiar auto-calibrado pelo ruído medido |
+| `scripts/relatorio-bench.py` | relatório Markdown da medição (com Resumo em português corrente no topo) e, com dois lados, o veredito de regressão do workflow `bench` — limiar auto-calibrado pelo ruído medido, teto igual ao menor efeito prometido (ADR-0027) |
+| `bench/contrato.hpp` | a ÚNICA tabela de métricas: alimenta o JSON, o comparador e o relatório, e declara à parte quem pode reprovar um PR (ADR-0026, ADR-0028) |
 
 ### Testes — 6 suítes, 13/13 invariantes
 
