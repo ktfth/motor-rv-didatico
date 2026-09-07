@@ -134,6 +134,10 @@ O que esse gate pega e o que não pega, **medido nesta máquina, com os parâmet
 em `src/core/apply.cpp`, compilada de verdade. Regressão sintética não serve como prova: ela
 preserva o ruído exatamente e superestima a detecção; a real traz o ruído dela junto.
 
+Esta primeira tabela mede as **três versões do script sobre o mesmo dado**, e por isso usa o mesmo
+binário dos dois lados: ela responde "o portão fecha?", não "quem pode reprovar?". A resposta da
+segunda pergunta exige dois binários e está na seção seguinte.
+
 | versão do gate | fechamento `nucleo.loop` | fechamento `snapshot.salva` | vermelho falso | cego | regressão real reprovada |
 |---|---|---|---|---|---|
 | antes de B1 (`48af6c1`) | 6/15 | 2/15 | 0/15 | **14/15** | 4/5 |
