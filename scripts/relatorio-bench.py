@@ -158,7 +158,20 @@ def consolida(docs):
 # --------------------------------------------------------------------------- comparação
 
 
-def compara(cabeca, base, limiar_pct, sigmas):
+# Teto de ruído: acima disto a comparação não decide nada.
+#
+# O número não é gosto. Este gate promete pegar REGRESSÃO GROSSA — "um fator", diz o README, isto
+# é 2×, que é um Δ de −50 %. Se o limiar exigido passa de 50 %, uma regressão de 2× cabe dentro
+# dele: o gate deixou de conseguir cumprir o que promete, e chamar isso de "sem regressão" é a
+# mesma aprovação vazia que o resto desta rodada corrigiu. Então acima do teto a série contratual
+# conta como NÃO COMPARADA (código 2), e não como aprovada.
+#
+# Tirar o filtro de `estavel` foi certo — ele respondia outra pergunta — mas nada tinha ficado no
+# lugar dele como teto: com CV de 200 % dos dois lados, uma queda de 80 % saía "dentro do ruído".
+TETO_EXIGIDO_PCT = 50.0
+
+
+def compara(cabeca, base, limiar_pct, sigmas, teto_pct=TETO_EXIGIDO_PCT):
     """Confronta os dois lados série a série.
 
     O que NÃO é pré-condição aqui: o `estavel` do harness. Aquela marca é o filtro de CV
@@ -169,7 +182,8 @@ def compara(cabeca, base, limiar_pct, sigmas):
     sobreviverem juntos tinha probabilidade de ~2 %. O gate avisava e não olhava nada.
 
     Uma série instável não é descartada: ela é comparada e o ruído dela — maior — entra no limiar
-    exigido, que é onde a instabilidade deve pesar. A marca continua visível no relatório.
+    exigido. Até o teto: passando dele, a linha sai com `decide = False`, porque um limiar maior
+    que a regressão que o gate promete pegar não é um limiar, é uma vista grossa.
     """
     linhas, nao_comparadas = [], []
     for nome, h in sorted(cabeca.items()):
@@ -190,6 +204,7 @@ def compara(cabeca, base, limiar_pct, sigmas):
         delta = 100.0 * (h["valor"] - b["valor"]) / b["valor"]
         ruido = math.sqrt(h["erro_padrao"] ** 2 + b["erro_padrao"] ** 2)
         exigido = max(limiar_pct, sigmas * ruido)
+        decide = exigido <= teto_pct
         pior = delta < -exigido if h["direcao"] == "maior_melhor" else delta > exigido
         melhorou = delta > exigido if h["direcao"] == "maior_melhor" else delta < -exigido
         linhas.append(
@@ -202,12 +217,112 @@ def compara(cabeca, base, limiar_pct, sigmas):
                 "delta": delta,
                 "ruido": ruido,
                 "exigido": exigido,
-                "regressao": pior,
-                "ganho": melhorou,
+                "decide": decide,
+                "regressao": pior and decide,
+                "ganho": melhorou and decide,
                 "instavel": not (h["estavel"] and b["estavel"]),
             }
         )
     return linhas, nao_comparadas
+
+
+def veredito_de(linhas, nao_comparadas, exigidas, tem_base, carga_ruim, sem_contrato):
+    """O veredito inteiro: as duas frases E o código de saída, decididos no mesmo lugar.
+
+    Eram dois lugares com precedências diferentes, e a contradição aparecia no relatório: cabeça
+    schema 1 contra base schema 2 imprimia "Não dá para dar veredito" no resumo e devolvia 1, com o
+    job anunciando `::error::regressão de desempenho`.
+
+    Quem decide o veredito são as séries DO CONTRATO. As outras aparecem no relatório e não votam:
+    medido em 15 rodadas de PR inocente com os parâmetros do job, olhar todas dava 1 vermelho
+    falso; olhar só as contratuais, nenhum. O contrato existe exatamente para dizer quais métricas
+    decidem — e era o próprio contrato que o gate ignorava na hora de reprovar.
+    """
+    por_nome = {l["nome"]: l for l in linhas}
+    motivos = dict(nao_comparadas)
+    decisivas = [por_nome[n] for n in exigidas if n in por_nome and por_nome[n]["decide"]]
+    houve_regressao = any(l["regressao"] for l in decisivas)
+
+    # Por que cada contratual ficou de fora, na linguagem de quem lê o resumo.
+    fora = {}
+    for n in exigidas:
+        if n in por_nome and por_nome[n]["decide"]:
+            continue
+        if n in por_nome:
+            fora[n] = (f"ruído acima do teto: exigiria {por_nome[n]['exigido']:.1f}%, "
+                       f"teto {TETO_EXIGIDO_PCT:.0f}%")
+        else:
+            fora[n] = motivos.get(n, "não comparada")
+    # "Não existe na base" é métrica nova deste PR: não há comparação possível, e reprovar por isso
+    # seria reprovar quem acrescenta métrica. As outras causas são cegueira do gate.
+    novas = [n for n, m in fora.items() if m == "não existe na base"]
+    cegas = [n for n in fora if n not in novas]
+
+    if sem_contrato:
+        frases = (
+            "**Não dá para dar veredito.** Este JSON não declara o contrato de métricas (é de um "
+            "harness anterior ao bloco `contrato`), então não há como saber o que tinha de ser "
+            "comparado. Rode a medição com o binário desta árvore, ou passe `--exigir`.",
+            "sem contrato no JSON: nenhuma métrica obrigatória pôde ser exigida.",
+        )
+        return frases[0], frases[1], 2, cegas, novas, fora
+    if carga_ruim:
+        return (
+            "**Não dá para comparar os dois lados:** eles mediram cargas diferentes — "
+            f"{carga_ruim}. Números de sessões diferentes não se confrontam; o que está abaixo "
+            "descreve este commit e nada mais.",
+            f"comparação recusada — a base mediu outra carga ({carga_ruim}).",
+            2, cegas, novas, fora,
+        )
+    if not tem_base:
+        return (
+            "**Medição sem comparação.** Não houve uma base para confrontar: os números abaixo "
+            "descrevem este commit, e não dizem se ele ficou mais rápido ou mais lento.",
+            "", 0, cegas, novas, fora,
+        )
+    if houve_regressao:
+        return (
+            "**Ficou mais lento.** Pelo menos uma métrica obrigatória piorou além do que a "
+            "variação natural da máquina explica — a tabela abaixo diz qual.",
+            "há regressão acima do ruído. ADR-0016: nenhuma otimização é aprovável contra um "
+            "baseline que ela mesma derrubou.",
+            1, cegas, novas, fora,
+        )
+    if exigidas and not decisivas:
+        # Nenhuma métrica obrigatória decidiu nada. Vale inclusive quando TODAS são novas — o
+        # estado que um PR produz ao renomear a série no contrato e no ponto de registro, que é
+        # uma edição de uma linha que este desenho incentiva. Verde ali seria o gate aprovando
+        # sem ter comparado coisa nenhuma, de novo.
+        return (
+            "**Não deu para dizer.** Nenhuma das métricas obrigatórias pôde ser comparada. As "
+            "outras séries não regrediram, mas as que decidem não foram olhadas.",
+            "nenhuma regressão entre as séries comparadas — e NENHUMA das métricas obrigatórias "
+            "entrou nessa conta.",
+            2, cegas, novas, fora,
+        )
+    if cegas:
+        return (
+            "**Sem regressão no que deu para comparar.** Nada piorou além da variação natural da "
+            "máquina — mas parte das métricas obrigatórias ficou de fora, e o veredito não fala "
+            "por elas.",
+            "nenhuma regressão acima do ruído entre as séries comparadas; parte das obrigatórias "
+            "ficou de fora.",
+            2, cegas, novas, fora,
+        )
+    if novas:
+        return (
+            "**Sem regressão.** Nenhuma métrica obrigatória piorou além da variação natural da "
+            "máquina — e " + ", ".join(f"`{n}`" for n in novas)
+            + " é nova neste PR, então não havia base para ela.",
+            "nenhuma regressão acima do ruído; métrica nova sem base ainda.",
+            0, cegas, novas, fora,
+        )
+    return (
+        "**Sem regressão.** Nenhuma métrica obrigatória piorou além da variação natural da "
+        "máquina.",
+        "nenhuma regressão acima do ruído.",
+        0, cegas, novas, fora,
+    )
 
 
 # --------------------------------------------------------------------------- escrita
@@ -267,93 +382,30 @@ def contrato_de(doc):
 def linha_resumo(e, l, unidade, motivo):
     """Uma métrica contratual em três colunas: o que se mediu, e como ficou contra a base.
 
-    `motivo` é o que `compara()` registrou em `nao_comparadas` — e não um palpite. Antes esta
-    função olhava só o `estavel` do lado da cabeça e, quando o descartado era a BASE, imprimia
-    "sem base": afirmação falsa (a base existia) e incompatível com a frase do próprio resumo três
-    linhas acima, que dizia outra coisa.
+    `motivo` é o que o veredito registrou — e não um palpite. Antes esta função olhava só o
+    `estavel` do lado da cabeça e, quando o descartado era a BASE, imprimia "sem base": afirmação
+    falsa (a base existia) e incompatível com a frase do próprio resumo três linhas acima.
+
+    E a palavra "igual" saiu: com um limiar de 26 %, um Δ de −26,1 % era impresso como
+    "igual, dentro do ruído". Não é igual — é indistinguível com a precisão desta medição, que é
+    outra coisa, e o número que separa as duas vai junto.
     """
     if e is None or not e["medida"]:
         return "não medida nesta execução", (motivo or "—")
     valor = f"{num(e['valor'])} {unidade}"
-    if l is None:
+    if l is None or motivo:
         return valor, (motivo or "não comparada")
     if l["regressao"]:
         return valor, f"**{l['delta']:+.1f}% — pior**"
     if l["ganho"]:
         return valor, f"{l['delta']:+.1f}% — melhor"
-    return valor, f"{l['delta']:+.1f}% — igual, dentro do ruído"
+    return valor, f"{l['delta']:+.1f}% — dentro do ruído (exigido {l['exigido']:.1f}%)"
 
 
-def vereditos(tem_base, houve_regressao, cegas, novas, obrigatorias, comparadas, carga_ruim,
-              sem_contrato):
-    """O veredito em duas formas: a do resumo (para quem abre o job) e a do detalhe.
-
-    Uma função só porque as duas frases já divergiram: o resumo dizia "não deu para dizer" e, vinte
-    linhas abaixo, o detalhe dizia "nenhuma regressão". Duas conclusões diferentes no mesmo
-    documento é pior que nenhuma — quem lê escolhe a que preferir.
-    """
-    if sem_contrato:
-        # Falhar ABERTO era o defeito: JSON sem contrato dava lista vazia de obrigatórias, nenhuma
-        # métrica conferida e a frase "Sem regressão" com código 0.
-        return (
-            "**Não dá para dar veredito.** Este JSON não declara o contrato de métricas (é de um "
-            "harness anterior ao bloco `contrato`), então não há como saber o que tinha de ser "
-            "comparado. Rode a medição com o binário desta árvore, ou passe `--exigir`.",
-            "sem contrato no JSON: nenhuma métrica obrigatória pôde ser exigida.",
-        )
-    if carga_ruim:
-        return (
-            "**Não dá para comparar os dois lados:** eles mediram cargas diferentes — "
-            f"{carga_ruim}. Números de sessões diferentes não se confrontam; o que está abaixo "
-            "descreve este commit e nada mais.",
-            f"comparação recusada — a base mediu outra carga ({carga_ruim}).",
-        )
-    if not tem_base:
-        return (
-            "**Medição sem comparação.** Não houve uma base para confrontar: os números abaixo "
-            "descrevem este commit, e não dizem se ele ficou mais rápido ou mais lento.",
-            "",
-        )
-    if houve_regressao:
-        return (
-            "**Ficou mais lento.** Pelo menos uma métrica piorou além do que a variação natural "
-            "da máquina explica — a tabela abaixo diz qual.",
-            "há regressão acima do ruído. ADR-0016: nenhuma otimização é aprovável contra um "
-            "baseline que ela mesma derrubou.",
-        )
-    if obrigatorias and not comparadas:
-        # "Nada regrediu" quando nenhuma métrica obrigatória pôde ser comparada é a frase que este
-        # projeto chama de gate verde sem ter feito nada. O relatório diz o que houve: cegueira.
-        return (
-            "**Não deu para dizer.** Nenhuma das métricas obrigatórias pôde ser comparada. As "
-            "outras séries não regrediram, mas as que decidem não foram olhadas.",
-            "nenhuma regressão entre as séries que deu para comparar — e NENHUMA das métricas "
-            "obrigatórias entrou nessa conta.",
-        )
-    if cegas:
-        return (
-            "**Sem regressão no que deu para comparar.** Nada piorou além da variação natural da "
-            "máquina — mas parte das métricas obrigatórias ficou de fora, e o veredito não fala "
-            "por elas.",
-            "nenhuma regressão acima do ruído entre as séries comparadas; parte das obrigatórias "
-            "ficou de fora.",
-        )
-    if novas:
-        # Série que a base não tem: este PR a introduziu. Não é cegueira do gate — é a primeira
-        # medição dela, e não há contra o que comparar. Aparece, mas não reprova.
-        return (
-            "**Sem regressão.** Nenhuma métrica piorou além da variação natural da máquina — e "
-            + ", ".join(f"`{n}`" for n in novas)
-            + " é nova neste PR, então não havia base para ela.",
-            "nenhuma regressão acima do ruído; métrica nova sem base ainda.",
-        )
-    return (
-        "**Sem regressão.** Nenhuma métrica piorou além da variação natural da máquina.",
-        "nenhuma regressão acima do ruído.",
-    )
+#!/usr/bin/env python3
 
 
-def secao_resumo(doc, cabeca, linhas, motivos, tem_base, frase, cegas, saida):
+def secao_resumo(doc, cabeca, linhas, fora, tem_base, frase, cegas, saida):
     """As primeiras linhas do relatório: passou ou não, e os poucos números que decidem isso.
 
     Existe porque o resumo de um job do GitHub é lido por quem quer uma resposta, não por quem vai
@@ -375,7 +427,7 @@ def secao_resumo(doc, cabeca, linhas, motivos, tem_base, frase, cegas, saida):
             e = cabeca.get(c["serie"])
             unidade = e["unidade"] if e else ""
             valor, veredito = linha_resumo(
-                e, por_nome.get(c["serie"]), unidade, motivos.get(c["serie"])
+                e, por_nome.get(c["serie"]), unidade, fora.get(c["serie"])
             )
             saida.append(
                 f"| {c['rotulo']} | {valor} | {veredito} |" if tem_base
@@ -398,8 +450,8 @@ def secao_resumo(doc, cabeca, linhas, motivos, tem_base, frase, cegas, saida):
         saida.append(
             "\n> **Atenção:** "
             + ", ".join(f"`{n}`" for n in cegas)
-            + " não entrou na comparação, embora os dois lados a tenham. O veredito acima não "
-            "fala por ela, e o job reprova por isso."
+            + " não decidiu nada nesta comparação. O veredito acima não fala por ela, e o job "
+            "reprova por isso."
         )
     if not doc["ambiente"].get("valido_para_baseline", True):
         saida.append(
@@ -410,25 +462,32 @@ def secao_resumo(doc, cabeca, linhas, motivos, tem_base, frase, cegas, saida):
 
 
 def secao_ambiente(doc, saida):
-    amb, carga, h = doc["ambiente"], doc.get("carga", {}), doc["harness"]
+    # `.get` nos três: um JSON sem `harness` derrubava o relatório inteiro com KeyError, e o
+    # documento que falta um bloco é justamente o que mais precisa ser lido.
+    amb = doc.get("ambiente") or {}
+    carga = doc.get("carga") or {}
+    h = doc.get("harness") or {}
     saida.append("\n## Ambiente e método\n")
     saida.append("| | |")
     saida.append("|---|---|")
-    saida.append(f"| commit | `{amb['commit']}` |")
-    saida.append(f"| máquina | {amb['maquina']} |")
-    saida.append(f"| kernel | {amb['kernel']} |")
-    saida.append(f"| flags | `{amb['flags']}` |")
-    saida.append(f"| WAL | {amb['dispositivo_wal']} |")
+    saida.append(f"| commit | `{amb.get('commit', '?')}` |")
+    saida.append(f"| máquina | {amb.get('maquina', '?')} |")
+    saida.append(f"| kernel | {amb.get('kernel', '?')} |")
+    saida.append(f"| flags | `{amb.get('flags', '?')}` |")
+    saida.append(f"| WAL | {amb.get('dispositivo_wal', '?')} |")
     if carga.get("eventos"):
         saida.append(
             f"| carga | {carga['dias']} pregão(ões), {carga['negocios_por_dia']} negócios/dia, "
             f"{carga['investidores']} investidores, {carga['particoes']} partição(ões), "
             f"semente {carga['semente']} → **{carga['eventos']} eventos** |"
         )
-    saida.append(
-        f"| harness | {h['aquecimento']} aquecimentos, {h['repeticoes']} repetições, "
-        f"descarte acima de {h['limiar_cv_pct']:.0f}% de CV, até {h['tentativas']} tentativas |"
-    )
+    if h:
+        saida.append(
+            f"| harness | {h['aquecimento']} aquecimentos, {h['repeticoes']} repetições, "
+            f"descarte acima de {h['limiar_cv_pct']:.0f}% de CV, até {h['tentativas']} tentativas |"
+        )
+    else:
+        saida.append("| harness | o documento não declara o bloco `harness` |")
     if not amb.get("valido_para_baseline", True):
         saida.append(
             f"\n> **Esta medição não vale como baseline:** {amb.get('por_que_invalido', '?')}."
@@ -483,18 +542,34 @@ def secao_ausentes(doc, saida):
     saida.append("")
 
 
-def secao_comparacao(linhas, nao_comparadas, limiar_pct, sigmas, saida):
+def secao_comparacao(linhas, nao_comparadas, exigidas, limiar_pct, sigmas, saida):
     saida.append("\n## Comparação com a base (mesmo runner, mesma execução)\n")
     saida.append(
         f"Regressão exige passar dos dois testes: **{limiar_pct:.0f}%** (limiar do projeto) "
         f"E **{sigmas:.0f}× o ruído** medido das duas séries. A coluna *exigido* mostra qual "
         "dos dois mandou em cada linha.\n"
     )
+    saida.append(
+        "Só as séries **do contrato** decidem o veredito; as outras são informação. Medido em 15 "
+        "rodadas de PR inocente com os parâmetros do job, deixar todas votarem dava 1 vermelho "
+        "falso; só as contratuais, nenhum."
+        f" E acima de **{TETO_EXIGIDO_PCT:.0f}%** de exigido a linha não decide nada: um limiar "
+        "maior que a regressão de 2× que este gate promete pegar não é limiar, é vista grossa.\n"
+    )
     if linhas:
         saida.append("| série | base | este PR | Δ | ruído | exigido | |")
         saida.append("|---|---:|---:|---:|---:|---:|---|")
         for l in sorted(linhas, key=lambda x: (not x["regressao"], x["nome"])):
-            marca = "**REGRESSÃO**" if l["regressao"] else ("ganho" if l["ganho"] else "ok")
+            if not l["decide"]:
+                marca = f"não decide (exigido > {TETO_EXIGIDO_PCT:.0f}%)"
+            elif l["regressao"]:
+                marca = "**REGRESSÃO**"
+            elif l["ganho"]:
+                marca = "ganho"
+            else:
+                marca = "ok"
+            if l["nome"] not in exigidas and marca not in ("ok",):
+                marca += " · informativa, não vota"
             saida.append(
                 f"| `{l['nome']}` | {num(l['base'])} | {num(l['cabeca'])} | {l['delta']:+.2f}% | "
                 f"±{l['ruido']:.2f}% | {l['exigido']:.2f}% | {marca} |"
@@ -556,42 +631,20 @@ def main():
     # A comparação é calculada ANTES de escrever qualquer coisa: o resumo abre o relatório e
     # precisa do veredito que antes só existia no meio dele.
     linhas, nao_comparadas, docs_base = [], [], None
-    houve_regressao = False
-    cegas, novas = [], []
     carga_ruim = None
     if a.contra:
         docs_base = carrega(a.contra)
         carga_ruim = carga_divergente(docs[0], docs_base[0])
     if a.contra and not carga_ruim:
-        base = consolida(docs_base)
-        linhas, nao_comparadas = compara(cabeca, base, limiar, a.sigmas)
-        houve_regressao = any(l["regressao"] for l in linhas)
-        # Uma métrica que o projeto trata como contratual não pode sumir da comparação sem que
-        # alguém veja — e "sumir" tem duas causas com consequências diferentes:
-        #
-        #   CEGA  — os dois lados têm a série e mesmo assim não deu para comparar. É falha do
-        #           gate, e reprova (código 2): "não houve regressão" seria uma afirmação que
-        #           ninguém verificou.
-        #   NOVA  — a base não tem a série. Este PR a introduziu; não existe comparação possível,
-        #           e reprovar por isso seria reprovar quem acrescenta métrica. Aparece no
-        #           relatório e não reprova.
-        motivos = dict(nao_comparadas)
-        comparadas = {l["nome"] for l in linhas}
-        for n in exigidas:
-            if n in comparadas:
-                continue
-            (novas if motivos.get(n) == "não existe na base" else cegas).append(n)
+        linhas, nao_comparadas = compara(cabeca, consolida(docs_base), limiar, a.sigmas)
 
-    # As duas frases do veredito saem da MESMA função: o resumo e o detalhe não podem discordar.
-    # E as duas olham para `exigidas` — a mesma lista que decide o código de saída, para que não
-    # exista relatório dizendo "não deu para dizer" com código 0.
-    comparadas_exigidas = [n for n in exigidas if any(l["nome"] == n for l in linhas)]
-    frase_resumo, frase_detalhe = vereditos(
-        bool(a.contra), houve_regressao, cegas, novas, exigidas, comparadas_exigidas, carga_ruim,
-        sem_contrato,
+    # Frases e código de saída saem da MESMA função: não existe mais relatório dizendo "não deu
+    # para dizer" e processo devolvendo 0, nem resumo dizendo "sem veredito" e job anunciando
+    # regressão.
+    frase_resumo, frase_detalhe, rc, cegas, novas, fora = veredito_de(
+        linhas, nao_comparadas, exigidas, bool(a.contra), carga_ruim, sem_contrato
     )
 
-    motivos = dict(nao_comparadas)
     saida = []
     if a.apendice:
         # Apêndice: entra concatenado embaixo de outro relatório (o do WAL, no workflow). Um
@@ -600,7 +653,7 @@ def main():
         saida.append(f"## {a.titulo}\n")
     else:
         saida.append(f"# {a.titulo}\n")
-        secao_resumo(docs[0], cabeca, linhas, motivos, bool(a.contra), frase_resumo, cegas, saida)
+        secao_resumo(docs[0], cabeca, linhas, fora, bool(a.contra), frase_resumo, cegas, saida)
     secao_ambiente(docs[0], saida)
     if len(a.medicao) > 1:
         saida.append(
@@ -620,12 +673,11 @@ def main():
         saida.append("\n> **Veredito:** " + frase_detalhe + "\n")
         if cegas:
             saida.append(
-                "\n> **Atenção:** a comparação NÃO cobriu "
-                + ", ".join(f"`{n}`" for n in cegas)
-                + ", que existe nos dois lados. O veredito acima vale para o resto, não para ela — "
-                "e o job reprova.\n"
+                "\n> **Atenção:** a comparação NÃO decidiu sobre "
+                + ", ".join(f"`{n}` ({fora[n]})" for n in cegas)
+                + ". O veredito acima vale para o resto, não para ela — e o job reprova.\n"
             )
-        secao_comparacao(linhas, nao_comparadas, limiar, a.sigmas, saida)
+        secao_comparacao(linhas, nao_comparadas, exigidas, limiar, a.sigmas, saida)
 
     saida.append("\n## Séries medidas\n")
     secao_series(cabeca, saida)
@@ -643,15 +695,11 @@ def main():
     else:
         sys.stdout.write(texto)
 
-    # 0 = sem regressão; 1 = regressão; 2 = não deu para olhar. O 2 é separado do 1 de propósito:
-    # "está mais lento" e "não deu para olhar" são fatos diferentes — e desde a devolução do
-    # verificador o 2 REPROVA o job, porque um gate cego que avisa é um gate que se aprende a
-    # ignorar. Métrica nova (sem base) não cai aqui: não há cegueira, há primeira medição.
-    if houve_regressao:
-        return 1
-    if sem_contrato:
-        return 2
-    return 2 if (cegas or carga_ruim) else 0
+    # 0 = sem regressão; 1 = regressão; 2 = não deu para olhar. Vem de `veredito_de`, que é
+    # também quem escreve as duas frases — um lugar só, para que o texto e o código nunca mais
+    # discordem. O 2 REPROVA o job desde a devolução do verificador: um gate cego que avisa é um
+    # gate que se aprende a ignorar.
+    return rc
 
 
 if __name__ == "__main__":

@@ -138,6 +138,21 @@ int main(int argc, char** argv) {
       (void)std::fprintf(stderr, "motor-rv-bench: %s\n", erro.c_str());
       return 1;
     }
+    // O `schema` do arquivo também é conferido aqui: ele já ficou para trás em silêncio (o
+    // baseline em 1 enquanto a medição foi para 2), e um número de versão que ninguém lê não
+    // versiona nada.
+    const auto it_schema = doc.find("schema");
+    const double schema =
+        (it_schema != doc.end() && it_schema->second.tipo == rv::bench::ValorJson::Tipo::Numero)
+            ? it_schema->second.numero
+            : 0.0;
+    if (schema < 2.0) {
+      (void)std::fprintf(stderr,
+                         "motor-rv-bench: %s: schema %.0f — o esquema atual é 2 (o baseline "
+                         "declara `carga` e `harness`).\n",
+                         conferir.c_str(), schema);
+      return 2;
+    }
     std::vector<std::string> caminhos;
     caminhos.reserve(doc.size());
     for (const auto& [chave, valor] : doc) caminhos.push_back(chave);
@@ -258,23 +273,10 @@ int main(int argc, char** argv) {
     const rv::bench::Veredito v =
         rv::bench::compara(doc, runner.series(), limiar, carga.descricao());
     rv::bench::imprime_veredito(v, limiar, baseline);
-    // Precedência explícita, e ela importa: enquanto os três `if` eram independentes e o 5 vinha
-    // por último, QUALQUER baseline sem bloco `carga` — todos os anteriores a esta mudança —
-    // transformava uma regressão medida em 5, com o stdout gritando REGRESSÃO e o `bench.yml`
-    // conferindo `test $? -eq 3`. Uma regressão medida não é mascarada por uma conferência que
-    // faltou.
-    if (v.houve_regressao) {
-      codigo = 3;
-    } else if (v.carga_incompativel) {
-      codigo = 4;  // nada foi comparado: nem regressão, nem aprovação
-    } else if (!v.sem_baseline.empty() || !v.nao_comparadas.empty()) {
-      // Métrica contratual sem número no baseline. Sair 0 aqui era o mesmo gate verde de sempre:
-      // "SEM BASELINE — nada a comparar" impresso, e o processo dizendo que passou.
-      codigo = 6;
-    } else if (v.comparou_sem_conferir_carga()) {
-      // Comparou, mas sem poder conferir a carga: os números podem ser de duas sessões diferentes.
-      codigo = 5;
-    }
+    // A precedência mora em `codigo_de` (bench/comparador.hpp), que é também de onde o texto do
+    // veredito tira o código que anuncia. Enquanto eram dois lugares, o terminal prometia um
+    // código e o processo devolvia outro.
+    codigo = rv::bench::codigo_de(v);
   }
 
   if (!gravar.empty()) {
@@ -285,6 +287,18 @@ int main(int argc, char** argv) {
                          "motor-rv-bench: recuso gravar baseline — %s.\n"
                          "Rode com o preset `release`.\n",
                          amb.por_que_invalido().c_str());
+      return 2;
+    }
+    // `--limiar-cv` alto desliga a recusa por instabilidade: com 1000 %, toda série sai `estavel`
+    // e a conferência de baixo não recusa nada. O arquivo até grava `limiar_cv_pct`, e ninguém o
+    // lê. Como o README promete que gravar-baseline "recusa se qualquer série estiver instável",
+    // sem condição, é aqui que a promessa passa a valer.
+    if (cfg.limiar_cv_pct != rv::bench::Config{}.limiar_cv_pct) {
+      (void)std::fprintf(stderr,
+                         "motor-rv-bench: recuso gravar baseline com --limiar-cv %.1f%% (o padrão "
+                         "é %.1f%%).\nUm limiar afrouxado faz toda série sair `estável` e esvazia "
+                         "a recusa por instabilidade.\n",
+                         cfg.limiar_cv_pct, rv::bench::Config{}.limiar_cv_pct);
       return 2;
     }
     bool alguma_instavel = false;

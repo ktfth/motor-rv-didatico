@@ -282,7 +282,16 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
   return v;
 }
 
+int codigo_de(const Veredito& v) noexcept {
+  if (v.houve_regressao) return 3;
+  if (v.carga_incompativel) return 4;
+  if (!v.sem_baseline.empty() || !v.nao_comparadas.empty()) return 6;
+  if (v.comparou_sem_conferir_carga()) return 5;
+  return 0;
+}
+
 void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& arquivo) {
+  const int codigo = codigo_de(v);
   (void)std::printf("\n== comparação com %s (limiar %.0f%%) ==\n", arquivo.c_str(), limiar_pct);
   if (v.carga_incompativel) {
     (void)std::printf(
@@ -307,10 +316,16 @@ void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& a
         "  métrica. Sem conferi-la, o que vem abaixo pode estar comparando dois experimentos.\n"
         "  Regrave o baseline com --gravar-baseline para que ele passe a declarar a carga.\n",
         motivo.c_str());
+    if (codigo == 5) {
+      (void)std::printf("  É o que o código de saída 5 diz.\n");
+    }
   }
   for (const std::string& k : v.nao_comparadas) {
-    (void)std::printf("  %-44s NÃO COMPARADA — %s\n", k.substr(0, k.find(' ')).c_str(),
-                      k.substr(k.find('(')).c_str());
+    const size_t espaco = k.find(' ');
+    const std::string chave = k.substr(0, espaco);
+    std::string motivo = k.substr(espaco + 1);
+    if (!motivo.empty() && motivo.front() == '(') motivo = motivo.substr(1, motivo.size() - 2);
+    (void)std::printf("  %-44s NÃO COMPARADA: %s\n", chave.c_str(), motivo.c_str());
   }
   if (v.comparacoes.empty() && v.sem_baseline.empty() && v.nao_comparadas.empty()) {
     (void)std::printf("  nenhuma métrica desta execução tem chave no baseline.\n");
@@ -322,9 +337,12 @@ void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& a
   if (!v.sem_baseline.empty() || !v.nao_comparadas.empty()) {
     (void)std::printf(
         "  As de cima são métricas CONTRATUAIS que o gate NÃO comparou — por falta de número\n"
-        "  no baseline ou por a medição desta execução ter saído ruim. É o código de saída 6,\n"
-        "  e não 0: \"não deu para comparar\" não é aprovação. Fixe o baseline na máquina de\n"
-        "  referência, ou repita a medição numa máquina quieta.\n");
+        "  no baseline ou por a medição desta execução ter saído ruim. \"Não deu para\n"
+        "  comparar\" não é aprovação: fixe o baseline na máquina de referência, ou repita a\n"
+        "  medição numa máquina quieta.\n");
+    if (codigo == 6) {
+      (void)std::printf("  É o código de saída 6, e não 0.\n");
+    }
   }
   for (const Comparacao& c : v.comparacoes) {
     (void)std::printf("  %-44s baseline %12.2f  medido %12.2f  %+7.2f%%  %s\n", c.chave.c_str(),
@@ -333,13 +351,18 @@ void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& a
   if (v.comparou_sem_conferir_carga()) {
     (void)std::printf(
         "\n  As linhas acima NÃO são aprovação: elas comparam números cuja carga não foi\n"
-        "  conferida. É o que o código de saída 5 diz.\n");
+        "  conferida.%s\n",
+        codigo == 5 ? " É o que o código de saída 5 diz." : "");
   }
   if (v.houve_regressao) {
     (void)std::printf(
         "\n  Há regressão acima do limiar. ADR-0016: nenhuma otimização é aprovável\n"
         "  contra um baseline que ela mesma derrubou.\n");
   }
+  // A última linha é o código que ESTE processo vai devolver. Sem ela, quem lê o terminal deduz o
+  // código pelos avisos que apareceram — e foi assim que o texto passou a prometer um 5 num caso
+  // que saía 3.
+  (void)std::printf("\n  código de saída: %d\n", codigo);
 }
 
 }  // namespace rv::bench

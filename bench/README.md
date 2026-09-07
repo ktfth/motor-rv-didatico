@@ -127,28 +127,41 @@ os dois lados **intercalados, três vezes cada, no mesmo runner** — o único a
 comparação isola a mudança de código do hardware. O relatório vai para o resumo do job e para os
 artefatos.
 
-O que esse gate pega e o que não pega, **medido nesta máquina e não suposto**. O procedimento: 5
-rodadas independentes, cada uma com 3 execuções por lado (`--suites nucleo,snapshot --repeticoes 9`,
-1 pregão, 1500 negócios/dia, 200 investidores), o MESMO binário dos dois lados — um PR inocente. Nas
-mesmas 5 rodadas, uma cópia do lado da cabeça com regressão de 2× injetada (metade da vazão do
-núcleo, dobro da duração do snapshot), escalando todas as amostras para preservar o ruído medido:
+O que esse gate pega e o que não pega, **medido nesta máquina, com os parâmetros DESTE job** —
+`--suites base,nucleo,snapshot --repeticoes 9`, 1 pregão, 5000 negócios/dia, 500 investidores,
+5 execuções por lado. Duas campanhas: 15 rodadas de PR inocente (o MESMO binário dos dois lados) e
+5 rodadas com uma **regressão real de código** — uma segunda árvore com `#pragma GCC optimize("O0")`
+em `src/core/apply.cpp`, compilada de verdade. Regressão sintética não serve como prova: ela
+preserva o ruído exatamente e superestima a detecção; a real traz o ruído dela junto.
 
-| | fechamento (série comparada) | regressão de 2× pega | falso positivo |
-|---|---|---|---|
-| `nucleo.loop.eventos_por_s_por_core` | 5/5 | 5/5 | 0/5 |
-| `snapshot.salva.duracao_ms` | 5/5 | 5/5 | 0/5 |
+| versão do gate | fechamento `nucleo.loop` | fechamento `snapshot.salva` | vermelho falso | cego | regressão real reprovada |
+|---|---|---|---|---|---|
+| antes de B1 (`48af6c1`) | 6/15 | 2/15 | 0/15 | **14/15** | 4/5 |
+| B1 aplicado (`41517d0`) | 15/15 | 15/15 | **1/15** | 0/15 | 5/5 |
+| **hoje** | **15/15** | **15/15** | **0/15** | **0/15** | **5/5** |
 
-O limiar exigido ficou entre 9,2 % e 49,1 % conforme a série e a rodada, e os Δ do PR inocente
-chegaram a −19,4 % sem reprovar. Ou seja: o gate pega **regressão grossa** — um fator, um `O(n²)`
-acidental, uma flag de otimização que caiu. Não pega 5 %, e prometer que pegaria seria construir um
-gate que reprova PR inocente até alguém desligá-lo.
+As três linhas são o mesmo dado, lido por três versões do script. A do meio é o portão que fechava
+mas deixava **qualquer** série votar; o vermelho falso dela foi uma série não contratual. A de hoje
+só deixa votar quem o contrato nomeia.
 
-Estas duas linhas já foram **0/5 e 0/5** — o portão não fechava e não pegava nada, e o job só
-avisava. As duas causas, e as duas correções, estão na seção "A regra de ruído" de
-`scripts/relatorio-bench.py`: o filtro de estabilidade do baseline usado como pré-condição da
-comparação, e a dispersão usada onde cabia o erro padrão da mediana. Com o gate fechando, o código 2
-("não deu para olhar") passou a **reprovar** o job: um gate cego que avisa é um gate que se aprende
-a ignorar.
+Na regressão real, `nucleo.loop.eventos_por_s_por_core` caiu entre 37,7 % e 50,0 % e foi marcada nas
+5 rodadas. `snapshot.salva.duracao_ms` não foi marcada em nenhuma, e está certo: `-O0` no `apply`
+não torna o snapshot mais lento.
+
+O limiar exigido nas 15 rodadas inocentes ficou entre **9,3 % e 31,5 %** (núcleo) e **6,6 % e
+31,2 %** (snapshot) — inteiramente abaixo do teto de 50 %. Com **três** execuções por lado, o mesmo
+teto era estourado em 3 das 15 rodadas (exigido chegava a 53,8 %) e o job ficava vermelho por
+cegueira sem ninguém ter mudado código; foi essa medição que fixou o job em cinco execuções.
+
+Ou seja: o gate pega **regressão grossa** — um fator, um `O(n²)` acidental, uma flag de otimização
+que caiu. Não pega 5 %, e prometer que pegaria seria construir um gate que reprova PR inocente até
+alguém desligá-lo.
+
+**O teto de 50 %.** Acima dele a série contratual conta como não comparada (código 2), e não como
+aprovada. O número não é gosto: este gate promete pegar um fator — 2×, isto é um Δ de −50 %. Se o
+limiar exigido passa de 50 %, uma regressão de 2× cabe dentro dele e "sem regressão" vira uma
+afirmação que a medição não sustenta. O teto é o ponto onde o gate admite que não enxerga o que
+prometeu enxergar; o remédio é mais execuções por lado, não um teto mais alto.
 
 Quem pega 5 % é o outro gate: `motor-rv-bench --comparar bench/baseline.json`, rodado por
 `desempenho` na máquina de referência, onde o baseline vale (ADR-0022).

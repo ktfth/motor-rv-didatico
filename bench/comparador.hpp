@@ -80,6 +80,12 @@ struct Veredito {
 // `arquivo` é o baseline confrontado, e não a constante "bench/baseline.json": o gate também é
 // rodado contra baselines sintéticos (o workflow o faz), e um cabeçalho que nomeia o arquivo
 // errado é a mesma classe de erro que o resto deste arquivo existe para evitar.
+// O código de saída que este veredito produz, com a precedência do projeto: 3 (regressão) antes de
+// 4 (carga incompatível), antes de 6 (métrica contratual não comparada), antes de 5 (carga não
+// conferida). Uma função só porque `main` e `imprime_veredito` já discordaram: o texto anunciava
+// "é o que o código 5 diz" num caso que saía 3.
+[[nodiscard]] int codigo_de(const Veredito& v) noexcept;
+
 void imprime_veredito(const Veredito& v, double limiar_pct, const std::string& arquivo);
 
 }  // namespace rv::bench

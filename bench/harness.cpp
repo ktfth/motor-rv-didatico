@@ -212,12 +212,31 @@ Serie Runner::roda_(const char* grupo, const char* nome, Forma forma,
     s.amostras.clear();
     s.amostras.reserve(cfg_.repeticoes);
     uint64_t ops = 0;
+    bool alguma_sem_operacao = false;
     for (uint32_t i = 0; i < cfg_.repeticoes; ++i) {
       const Amostra a = corpo(hist);
       ops = a.operacoes;
+      if (a.operacoes == 0) alguma_sem_operacao = true;
       s.amostras.push_back(valor_de(forma, a));
     }
     s.operacoes_por_repeticao = ops;
+    // Repetição que não completou operação nenhuma é FALHA, e falha não é medição. Os corpos
+    // devolvem `Amostra{0, dt}` quando a operação medida deu erro (`save_state_image` falhou, a
+    // partição não coube na arena), e `valor_de` traduzia isso para 0,00 — que numa forma de
+    // duração é o melhor resultado possível. O efeito medido: a série saía `medida`, com CV 0 e
+    // portanto `estavel`, o relatório imprimia "0.00 ms  −100 % — melhor" e `--gravar-baseline`
+    // aceitaria o zero, deixando todo PR seguinte parecendo regressão infinita. Pelo mesmo
+    // argumento que faz "não comparado" não ser aprovação: medir zero também não é.
+    if (alguma_sem_operacao) {
+      s.medida = false;
+      s.estavel = false;
+      s.amostras.clear();
+      s.nota =
+          "medição inválida: uma repetição não completou operação nenhuma (a operação medida "
+          "falhou). Zero numa forma de duração seria o melhor resultado possível, e não é "
+          "resultado";
+      return s;
+    }
     s.cv_pct = cv_pct_de(s.amostras);
     if (s.cv_pct <= cfg_.limiar_cv_pct) {
       s.estavel = true;
