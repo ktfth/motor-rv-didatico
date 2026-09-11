@@ -64,7 +64,7 @@ struct IngressMetricsSnapshot {
   uint64_t events_received{0};
   uint64_t events_routed{0};
   uint64_t events_broadcast{0};
-  uint64_t backpressure_drops{0};
+  uint64_t backpressure_stalls{0};
   uint64_t parse_errors{0};
 };
 

@@ -30,6 +30,7 @@
 #include "edge/observability.hpp"
 #include "ingress/ingress_pipeline.hpp"
 #include "ingress/simulator.hpp"
+#include "ingress/tcp_server.hpp"
 #include "wal/io_uring_backend.hpp"
 #include "wal/wal.hpp"
 
@@ -100,6 +101,7 @@ void print_usage(const char* prog) {
   std::printf("  --particoes N      número de partições (potência de 2, padrão: 4)\n");
   std::printf("  --dir-wal DIR      diretório base dos arquivos WAL (padrão: /tmp/motor-rv-wal)\n");
   std::printf("  --metrics-port P   porta HTTP de métricas e healthz (padrão: 9100, 0=desativa)\n");
+  std::printf("  --ingress-port P   porta TCP SBE em loopback (padrão: 0=desativa)\n");
   std::printf(
       "  --servir, -s       mantém o servidor HTTP ativo após a carga até receber "
       "SIGINT/SIGTERM\n");
@@ -116,6 +118,7 @@ int main(int argc, char** argv) {
   uint32_t num_particoes = 4;
   std::string dir_wal = "/tmp/motor-rv-wal";
   uint16_t metrics_port = 9100;
+  uint16_t ingress_port = 0;
   bool modo_servidor = false;
   uint32_t dias = 1;
   uint32_t negocios_por_dia = 5000;
@@ -132,6 +135,8 @@ int main(int argc, char** argv) {
       dir_wal = argv[++i];
     } else if (a == "--metrics-port" && tem) {
       metrics_port = static_cast<uint16_t>(std::stoul(argv[++i]));
+    } else if (a == "--ingress-port" && tem) {
+      ingress_port = static_cast<uint16_t>(std::stoul(argv[++i]));
     } else if (a == "--servir" || a == "-s") {
       modo_servidor = true;
     } else if (a == "--dias" && tem) {
@@ -190,6 +195,14 @@ int main(int argc, char** argv) {
 
   // 2. Conectar IngressPipeline e Borda de Observabilidade
   rv::ingress::IngressPipeline pipeline(inboxes);
+  rv::ingress::TcpIngressServer tcp_ingress;
+  if (ingress_port > 0) {
+    if (!tcp_ingress.start(ingress_port, inboxes)) {
+      std::fprintf(stderr, "ERRO: falha ao iniciar ingress TCP na porta %u\n", ingress_port);
+      return 3;
+    }
+    std::printf("  Ingress TCP SBE: ativo em 127.0.0.1:%u\n", tcp_ingress.bound_port());
+  }
 
   rv::edge::ObservabilityCollector coletor;
   coletor.set_partition_count(num_particoes);
@@ -227,13 +240,14 @@ int main(int argc, char** argv) {
       coletor.update_partition(snap);
     }
     const auto& istats = pipeline.stats();
+    const auto tcp_stats = tcp_ingress.stats();
     rv::edge::IngressMetricsSnapshot is{};
-    is.bytes_received = istats.bytes_received;
-    is.events_received = istats.events_received;
-    is.events_routed = istats.events_routed;
-    is.events_broadcast = istats.events_broadcast;
-    is.backpressure_drops = istats.backpressure_drops;
-    is.parse_errors = istats.parse_errors;
+    is.bytes_received = istats.bytes_received + tcp_stats.ingress.bytes_received;
+    is.events_received = istats.events_received + tcp_stats.ingress.events_received;
+    is.events_routed = istats.events_routed + tcp_stats.ingress.events_routed;
+    is.events_broadcast = istats.events_broadcast + tcp_stats.ingress.events_broadcast;
+    is.backpressure_stalls = istats.backpressure_stalls + tcp_stats.ingress.backpressure_stalls;
+    is.parse_errors = istats.parse_errors + tcp_stats.ingress.parse_errors;
     coletor.update_ingress(is);
   };
 
@@ -308,6 +322,7 @@ int main(int argc, char** argv) {
     // Alimenta o pipeline de ingress com timestamp avançando
     ts_simulado += 25'000;  // avança 25 microssegundos por evento
     (void)pipeline.feed(rv::ByteSpan{wire_buffer.data(), wire_buffer.size()}, ts_simulado);
+    tcp_ingress.poll_once(0, ts_simulado);
 
     // Avança o loop de cada partição
     for (auto& p : particoes) {
@@ -342,7 +357,7 @@ int main(int argc, char** argv) {
   std::printf("  Eventos de ingress     : %lu\n", pipeline.stats().events_received);
   std::printf("  Eventos roteados       : %lu\n", pipeline.stats().events_routed);
   std::printf("  Eventos de broadcast   : %lu\n", pipeline.stats().events_broadcast);
-  std::printf("  Backpressure drops     : %lu\n", pipeline.stats().backpressure_drops);
+  std::printf("  Backpressure stalls    : %lu\n", pipeline.stats().backpressure_stalls);
   std::printf("  Bytes processados      : %lu (%.2f MiB)\n", pipeline.stats().bytes_received,
               static_cast<double>(pipeline.stats().bytes_received) / (1024.0 * 1024.0));
   std::printf("  Vazão efetiva          : %.1f eventos/s\n\n",
@@ -366,19 +381,23 @@ int main(int argc, char** argv) {
     std::printf("\n[Borda de Observabilidade]\n");
     std::printf("  Saúde do nó (is_healthy): %s\n", coletor.is_healthy() ? "OK" : "DEGRADED");
     std::printf("  Prontidão (is_ready)    : %s\n", coletor.is_ready() ? "READY" : "NOT READY");
-
-    if (modo_servidor) {
-      std::printf("==> Servidor HTTP ouvindo na porta %u. Pressione Ctrl+C para encerrar...\n",
-                  metrics_server.bound_port());
-      while (g_rodando.load(std::memory_order_relaxed)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      }
-      std::printf("\n==> Sinal de parada recebido. Encerrando servidor...\n");
-    }
-
-    metrics_server.stop();
-    std::printf("  Servidor de métricas encerrado graciosamente.\n");
   }
+  if (modo_servidor) {
+    std::printf("==> Servidores ativos. Pressione Ctrl+C para encerrar...\n");
+    while (g_rodando.load(std::memory_order_relaxed)) {
+      const uint64_t now_ns =
+          static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now().time_since_epoch())
+                                    .count());
+      tcp_ingress.poll_once(10, now_ns);
+      for (auto& p : particoes) p->loop->poll(now_ns);
+      atualiza_metricas_coletor();
+      if (!tcp_ingress.is_running()) std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+    std::printf("\n==> Sinal de parada recebido. Encerrando servidores...\n");
+  }
+  metrics_server.stop();
+  tcp_ingress.stop();
   std::printf("==================================================================\n");
   std::printf("✓ Servidor motor-rv finalizado com sucesso.\n");
 

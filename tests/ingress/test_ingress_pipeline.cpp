@@ -9,16 +9,21 @@
 //   - Contrapressão quando o Inbox atinge saturação (WouldBlock)
 //   - Rejeição de mensagens malformadas ou com schemaId divergente
 
+#include <array>
 #include <cstring>
 #include <memory>
 #include <vector>
 
+#include <arpa/inet.h>
 #include <gtest/gtest.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "codec/events.hpp"
 #include "codec/template_ids.hpp"
 #include "ingress/ingress_pipeline.hpp"
 #include "ingress/sbe_message_header.hpp"
+#include "ingress/tcp_server.hpp"
 
 namespace rv::ingress {
 namespace {
@@ -219,7 +224,12 @@ TEST_F(IngressPipelineTest, ContrapressaoQuandoRingSatura) {
   auto st = pipeline_->feed(ByteSpan{wire.data(), wire.size()}, 400);
   EXPECT_FALSE(st.is_ok());
   EXPECT_EQ(st.code(), Err::WouldBlock);
-  EXPECT_EQ(pipeline_->stats().backpressure_drops, 1u);
+  EXPECT_EQ(pipeline_->stats().backpressure_stalls, 1u);
+  EXPECT_GT(pipeline_->pending_bytes(), 0u);
+
+  inboxes_[p.v]->pop();
+  EXPECT_TRUE(pipeline_->feed(ByteSpan{}, 401).is_ok());
+  EXPECT_EQ(pipeline_->pending_bytes(), 0u);
 }
 
 TEST_F(IngressPipelineTest, RejeitaSchemaInvalidoOuCorrompido) {
@@ -235,6 +245,98 @@ TEST_F(IngressPipelineTest, RejeitaSchemaInvalidoOuCorrompido) {
   auto st = pipeline_->feed(ByteSpan{wire.data(), wire.size()}, 500);
   EXPECT_FALSE(st.is_ok());
   EXPECT_EQ(pipeline_->stats().parse_errors, 1u);
+}
+
+TEST_F(IngressPipelineTest, FimDeStreamRecusaFrameTruncado) {
+  const std::array<std::byte, 5> partial{};
+  EXPECT_TRUE(pipeline_->feed(ByteSpan{partial.data(), partial.size()}, 550).is_ok());
+  const Status status = pipeline_->finish();
+  EXPECT_EQ(status.code(), Err::ShortPayload);
+  EXPECT_EQ(status.detail(), partial.size());
+  EXPECT_EQ(pipeline_->pending_bytes(), 0U);
+  EXPECT_EQ(pipeline_->stats().parse_errors, 1U);
+}
+
+TEST_F(IngressPipelineTest, BroadcastComInboxCheioNaoPublicaParcialmente) {
+  for (size_t i = 0; i < core::Inbox::kCapacity; ++i) {
+    core::IngressFrame* slot = inboxes_[0]->claim();
+    ASSERT_NE(slot, nullptr);
+    inboxes_[0]->publish();
+  }
+  codec::DayOpened day{};
+  SbeMessageHeader hdr{codec::DayOpened::kBlockLength, codec::DayOpened::kTemplateId,
+                       codec::kSchemaId, codec::kSchemaVersion};
+  std::vector<std::byte> wire(sizeof(hdr) + sizeof(day));
+  std::memcpy(wire.data(), &hdr, sizeof(hdr));
+  std::memcpy(wire.data() + sizeof(hdr), &day, sizeof(day));
+
+  EXPECT_EQ(pipeline_->feed(ByteSpan{wire.data(), wire.size()}, 600).code(), Err::WouldBlock);
+  for (size_t i = 1; i < kNumPartitions; ++i) EXPECT_EQ(inboxes_[i]->peek(), nullptr);
+  inboxes_[0]->pop();
+  EXPECT_TRUE(pipeline_->feed(ByteSpan{}, 601).is_ok());
+  for (size_t i = 1; i < kNumPartitions; ++i) ASSERT_NE(inboxes_[i]->peek(), nullptr);
+}
+
+TEST_F(IngressPipelineTest, ServidorTcpIsolaFragmentosDeClientesDistintos) {
+  TcpIngressServer server;
+  ASSERT_TRUE(server.start(0, inbox_ptrs_));
+  ASSERT_NE(server.bound_port(), 0);
+
+  auto connect_client = [&]() {
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    EXPECT_GE(fd, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(server.bound_port());
+    EXPECT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    return fd;
+  };
+  const int first = connect_client();
+  const int second = connect_client();
+  server.poll_once(10, 700);
+  ASSERT_EQ(server.client_count(), 2U);
+
+  auto make_wire = [](uint64_t id, uint64_t account) {
+    codec::TradeExecuted trade{};
+    trade.trade_id = id;
+    trade.account = account;
+    trade.qty = 10;
+    trade.price = 1'000;
+    trade.instrument = 1;
+    SbeMessageHeader hdr{codec::TradeExecuted::kBlockLength, codec::TradeExecuted::kTemplateId,
+                         codec::kSchemaId, codec::kSchemaVersion};
+    std::vector<std::byte> wire(sizeof(hdr) + sizeof(trade));
+    std::memcpy(wire.data(), &hdr, sizeof(hdr));
+    std::memcpy(wire.data() + sizeof(hdr), &trade, sizeof(trade));
+    return wire;
+  };
+  const auto one = make_wire(1, 11122233344ULL);
+  const auto two = make_wire(2, 99988877766ULL);
+  ASSERT_EQ(::send(first, one.data(), 5, MSG_NOSIGNAL), 5);
+  ASSERT_EQ(::send(second, two.data(), 7, MSG_NOSIGNAL), 7);
+  server.poll_once(10, 701);
+  ASSERT_EQ(::send(first, one.data() + 5, one.size() - 5, MSG_NOSIGNAL),
+            static_cast<ssize_t>(one.size() - 5));
+  ASSERT_EQ(::send(second, two.data() + 7, two.size() - 7, MSG_NOSIGNAL),
+            static_cast<ssize_t>(two.size() - 7));
+  server.poll_once(10, 702);
+
+  uint64_t received = 0;
+  for (const auto& inbox : inboxes_) {
+    while (const core::IngressFrame* frame = inbox->peek()) {
+      codec::TradeExecuted trade{};
+      std::memcpy(&trade, frame->payload, sizeof(trade));
+      EXPECT_TRUE(trade.trade_id == 1 || trade.trade_id == 2);
+      ++received;
+      inbox->pop();
+    }
+  }
+  EXPECT_EQ(received, 2U);
+  EXPECT_EQ(server.stats().ingress.events_routed, 2U);
+  ::close(first);
+  ::close(second);
+  server.poll_once(10, 703);
 }
 
 }  // namespace

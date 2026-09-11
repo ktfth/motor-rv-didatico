@@ -484,8 +484,8 @@ size_t ObservabilityCollector::render_prometheus(std::span<char> out) const noex
   w.append("motor_rv_ingress_events_total{type=\"broadcast\"} ");
   w.append_u64(ingress_.events_broadcast);
   w.append("\n");
-  w.append("motor_rv_ingress_events_total{type=\"backpressure_drops\"} ");
-  w.append_u64(ingress_.backpressure_drops);
+  w.append("motor_rv_ingress_events_total{type=\"backpressure_stalls\"} ");
+  w.append_u64(ingress_.backpressure_stalls);
   w.append("\n");
   w.append("motor_rv_ingress_events_total{type=\"parse_errors\"} ");
   w.append_u64(ingress_.parse_errors);
@@ -635,8 +635,8 @@ size_t ObservabilityCollector::render_json_status(std::span<char> out) const noe
   w.append("    \"events_broadcast\": ");
   w.append_u64(ingress_.events_broadcast);
   w.append(",\n");
-  w.append("    \"backpressure_drops\": ");
-  w.append_u64(ingress_.backpressure_drops);
+  w.append("    \"backpressure_stalls\": ");
+  w.append_u64(ingress_.backpressure_stalls);
   w.append(",\n");
   w.append("    \"parse_errors\": ");
   w.append_u64(ingress_.parse_errors);

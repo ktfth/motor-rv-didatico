@@ -24,7 +24,7 @@ struct IngressStats {
   uint64_t events_received{0};
   uint64_t events_routed{0};
   uint64_t events_broadcast{0};
-  uint64_t backpressure_drops{0};
+  uint64_t backpressure_stalls{0};
   uint64_t parse_errors{0};
 };
 
@@ -38,6 +38,9 @@ class IngressPipeline {
   // Alimenta o pipeline com um chunk de bytes recebidos da rede.
   // now_ns: timestamp de auditoria de chegada do evento (D2).
   [[nodiscard]] Status feed(ByteSpan chunk, uint64_t now_ns) noexcept;
+
+  // Encerra um stream. Bytes residuais significam frame TCP truncado.
+  [[nodiscard]] Status finish() noexcept;
 
   // Reseta o estado do buffer e contadores.
   void reset() noexcept;

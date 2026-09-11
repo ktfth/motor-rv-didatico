@@ -27,7 +27,7 @@ Status IngressPipeline::feed(ByteSpan chunk, uint64_t now_ns) noexcept {
     return Status::fail(Err::OutOfRange);
   }
 
-  std::memcpy(buffer_ + buffered_, chunk.data(), chunk.size());
+  if (!chunk.empty()) std::memcpy(buffer_ + buffered_, chunk.data(), chunk.size());
   buffered_ += chunk.size();
 
   Status last_status = kOk;
@@ -57,9 +57,12 @@ Status IngressPipeline::feed(ByteSpan chunk, uint64_t now_ns) noexcept {
 
     const std::byte* payload = buffer_ + sizeof(SbeMessageHeader);
     Status st = route_and_dispatch(hdr, payload, now_ns);
-    if (st.is_error()) {
-      last_status = st;
+    if (st.code() == Err::WouldBlock) {
+      // O frame permanece no buffer. O produtor tenta novamente depois que a partição drenar;
+      // consumir aqui transformaria contrapressão em perda silenciosa.
+      return st;
     }
+    if (st.is_error()) last_status = st;
 
     stats_.events_received++;
 
@@ -72,6 +75,14 @@ Status IngressPipeline::feed(ByteSpan chunk, uint64_t now_ns) noexcept {
   }
 
   return last_status;
+}
+
+Status IngressPipeline::finish() noexcept {
+  if (buffered_ == 0) return kOk;
+  const uint32_t pending = static_cast<uint32_t>(buffered_);
+  buffered_ = 0;
+  ++stats_.parse_errors;
+  return Status::fail(Err::ShortPayload, pending);
 }
 
 Status IngressPipeline::route_and_dispatch(const SbeMessageHeader& hdr, const std::byte* payload,
@@ -87,17 +98,18 @@ Status IngressPipeline::route_and_dispatch(const SbeMessageHeader& hdr, const st
   // DayOpened (1), ClosingPriceSet (8), CustodyReconciled (9), EodMarked (10)
   if (tmpl == codec::Tmpl::DayOpened || tmpl == codec::Tmpl::ClosingPriceSet ||
       tmpl == codec::Tmpl::CustodyReconciled || tmpl == codec::Tmpl::EodMarked) {
-    bool all_ok = true;
+    std::array<core::IngressFrame*, kMaxPartitions> slots{};
     for (uint32_t i = 0; i < num_inboxes_; ++i) {
       if (inboxes_[i] == nullptr) continue;
-
-      core::IngressFrame* slot = inboxes_[i]->claim();
-      if (slot == nullptr) {
-        stats_.backpressure_drops++;
-        all_ok = false;
-        continue;
+      slots[i] = inboxes_[i]->claim();
+      if (slots[i] == nullptr) {
+        stats_.backpressure_stalls++;
+        return Status::fail(Err::WouldBlock, i);
       }
-
+    }
+    for (uint32_t i = 0; i < num_inboxes_; ++i) {
+      core::IngressFrame* slot = slots[i];
+      if (slot == nullptr) continue;
       slot->arrival_ts_ns = now_ns;
       slot->tmpl = hdr.template_id;
       slot->len = hdr.block_length;
@@ -105,11 +117,8 @@ Status IngressPipeline::route_and_dispatch(const SbeMessageHeader& hdr, const st
       std::memcpy(slot->payload, payload, hdr.block_length);
       inboxes_[i]->publish();
     }
-    if (all_ok) {
-      stats_.events_broadcast++;
-      return kOk;
-    }
-    return Status::fail(Err::WouldBlock);
+    stats_.events_broadcast++;
+    return kOk;
   }
 
   // 2. Mensagens particionadas por DocumentId
@@ -152,7 +161,7 @@ Status IngressPipeline::route_and_dispatch(const SbeMessageHeader& hdr, const st
 
   core::IngressFrame* slot = inboxes_[p.v]->claim();
   if (slot == nullptr) {
-    stats_.backpressure_drops++;
+    stats_.backpressure_stalls++;
     return Status::fail(Err::WouldBlock, p.v);
   }
 

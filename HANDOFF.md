@@ -1,5 +1,18 @@
 # HANDOFF — motor-rv
 
+## Atualização de 11/09/2026 — rejeição do clearing paralelo
+
+O experimento local `src/clearing/` foi removido após revisão cética. Ele duplicava a máquina de
+estados de `src/core`, criava um segundo formato de snapshot, usava um vetor como falso WAL e
+comparava duas implementações quase idênticas como se fossem oráculos independentes. Endurecer esse
+caminho aumentaria a superfície de manutenção sem elevar a confiança no motor.
+
+A proposição mantida é uma só: liquidação e recuperação evoluem no caminho existente
+`core -> wal -> recovery`, com os cenários fechados à mão em `tests/domain/golden/` e falhas físicas
+em `tests/chaos/`. Após a remoção, os **18/18 testes** passam em `debug`, ASan/UBSan e
+`clang-release`. A próxima ação deve nascer de uma lacuna reproduzida nesse caminho, não da criação
+de um subsistema concorrente.
+
 Estado em **06/09/2026** (o corpo é de 03/09; a medição inicial e o harness de bench entraram em
 06/09). Este arquivo substitui o pacote de transferência original (o desenho sem código), que está
 preservado em `../raw/`.
