@@ -114,13 +114,13 @@ void TcpIngressServer::close_client(size_t index, bool error) noexcept {
 
 void TcpIngressServer::poll_once(int timeout_ms, uint64_t now_ns) noexcept {
   if (listen_fd_ < 0) return;
-  std::vector<pollfd> descriptors;
-  descriptors.reserve(clients_.size() + 1);
-  descriptors.push_back(pollfd{listen_fd_, POLLIN, 0});
+  std::array<pollfd, kMaxClients + 1> descriptors{};
+  size_t desc_count = 0;
+  descriptors[desc_count++] = pollfd{listen_fd_, POLLIN, 0};
   for (const auto& client : clients_) {
-    descriptors.push_back(pollfd{client->fd, static_cast<short>(POLLIN), 0});
+    descriptors[desc_count++] = pollfd{client->fd, static_cast<short>(POLLIN), 0};
   }
-  const int ready = ::poll(descriptors.data(), descriptors.size(), timeout_ms);
+  const int ready = ::poll(descriptors.data(), static_cast<nfds_t>(desc_count), timeout_ms);
   if (ready < 0) {
     if (errno != EINTR) ++retired_.connection_errors;
     return;
@@ -140,7 +140,7 @@ void TcpIngressServer::poll_once(int timeout_ms, uint64_t now_ns) noexcept {
         continue;
       }
     }
-    const short events = (i + 1 < descriptors.size()) ? descriptors[i + 1].revents : 0;
+    const short events = (i + 1 < desc_count) ? descriptors[i + 1].revents : 0;
     if ((events & (POLLERR | POLLNVAL)) != 0) {
       close_client(i, true);
       continue;
