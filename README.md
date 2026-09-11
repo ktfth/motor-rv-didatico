@@ -1,5 +1,12 @@
 # motor-rv
 
+[![CI](https://github.com/ktfth/motor-rv-didatico/actions/workflows/ci.yml/badge.svg)](https://github.com/ktfth/motor-rv-didatico/actions/workflows/ci.yml)
+[![Pages](https://github.com/ktfth/motor-rv-didatico/actions/workflows/pages.yml/badge.svg)](https://ktfth.github.io/motor-rv-didatico/)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?logo=cplusplus)](https://en.cppreference.com/w/cpp/23)
+[![Invariants](https://img.shields.io/badge/Invariantes-13%2F13%20verificados-22c55e)](#o-que-o-motor-promete-e-como-isso-%C3%A9-verificado)
+
+🌐 **Página Oficial do Projeto**: [https://ktfth.github.io/motor-rv-didatico/](https://ktfth.github.io/motor-rv-didatico/)
+
 Motor de pós-negociação de renda variável (B3) em C++23: núcleo *thread-per-core* com ledgers de
 custódia e financeiro, WAL com io_uring e *group commit*, snapshot EOD e exposição Open Finance
 (API Renda Variável v1.3.0) sob o perfil FAPI-BR v2.2.1.
