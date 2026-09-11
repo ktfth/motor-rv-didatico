@@ -34,7 +34,11 @@ target_link_libraries(motor-rv-bench
 # mover um arquivo de diretório sem reescrever include nenhum.
 target_include_directories(motor-rv-bench PRIVATE ${CMAKE_SOURCE_DIR})
 
-# O harness precisa dos CSVs reais da B3 (o simulador não inventa calendário). O caminho vem por
-# define para que rodar o binário de qualquer diretório funcione — um benchmark que só roda a
-# partir da raiz do repositório é um benchmark que ninguém roda duas vezes.
 target_compile_definitions(motor-rv-bench PRIVATE MOTOR_RV_DATA_DIR="${CMAKE_SOURCE_DIR}/data")
+
+add_custom_target(quick-bench
+  COMMAND motor-rv-bench --rapido
+  DEPENDS motor-rv-bench
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Executando benchmark de sanidade rápida (--rapido)"
+)

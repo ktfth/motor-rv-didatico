@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Git post-commit hook para motor-rv
+# Notifica status e sugere sincronização com o Focus Contract.
+
+COMMIT_MSG=$(git log -1 --pretty=%s)
+
+if command -v focus-contract >/dev/null 2>&1; then
+    echo "=================================================================="
+    echo "  Commit registrado: \"$COMMIT_MSG\""
+    echo "  Lembrete de governança: atualize o Focus Contract se encerrou o bloco:"
+    echo "    ./scripts/quick-handoff.sh \"$COMMIT_MSG\" \"<proximo-passo>\""
+    echo "=================================================================="
+fi

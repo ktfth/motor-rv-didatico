@@ -48,10 +48,11 @@ imagem de recuperação. Mesma semente, mesmo resultado.
 | `src/core/` | ledgers SoA com bucket vencido, máquina de estados gerada de uma declaração única, `apply()` completo dos dez eventos, loop da partição, outbox com contrapressão, imagem de recuperação por stall-and-copy |
 | `src/format/` | snapshot de exposição D-1: cabeçalho de 4096 bytes exatos, 27 seções, só offsets |
 | `src/ingress/` | particionador congelado com valores golden e simulador determinístico que lê o calendário real da B3 |
-| `src/app/` | `motor-rv-sim` |
-| `src/wal/` | **parcial**: formato (`WalHdr` 32 B, `SegmentHdr`), descoberta de alinhamento via `statx` com fallback, três backends de I/O (io_uring, pwrite, injeção de falhas) |
-| `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes |
-| `scripts/relatorio-bench.py` | relatório Markdown da medição (com Resumo em português corrente no topo) e, com dois lados, o veredito de regressão do workflow `bench` — limiar auto-calibrado pelo ruído medido, teto igual ao menor efeito prometido (ADR-0027) |
+| `src/app/` | `motor-rv-sim` e `motor-rv-wal-inspect` (inspeção e diagnóstico forense de integridade de segmentos WAL) |
+| `src/wal/` | **completo**: formato (`WalHdr` 32 B, `SegmentHdr`), alinhamento dinâmico via `statx`, três backends de I/O (`io_uring`, `pwrite`, injeção de falhas `fault_backend`), `GroupCommit` com coalescência, leitor sequencial `SegmentReader`, recuperação e replay determinístico a quente (`wal::recover`) com tolerância a corrupção e cauda rasgada |
+| `tests/chaos/` | suíte `test_recovery_chaos` com 9 cenários de falhas extremas (replay determinístico, cauda rasgada, snapshot + replay, falha de IO, corrupção de CRC, saltos de LSN, fallback de snapshot corrompido, replay de rejeições, blocos parciais truncados) |
+| `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes; métricas contratuais de WAL conectadas |
+| `scripts/` | `gate-local.sh` (pré-voo rápido e full), `quick-bench.sh`, `setup-hooks.sh`, `commit-and-handoff.sh`, hooks de `pre-commit` e `post-commit`, `check_invariants.py`, `gera-calendario.py`, `sbe_gen.py`, `relatorio-bench.py` |
 | `bench/contrato.hpp` | a ÚNICA tabela de métricas: alimenta o JSON, o comparador e o relatório, e declara à parte quem pode reprovar um PR (ADR-0026, ADR-0028) |
 
 ### Testes — 6 suítes, 13/13 invariantes

@@ -11,3 +11,7 @@ regressão do workflow de medição, e essa política é do papel que responde p
 | `gera-calendario.py` | gera `data/calendario-b3-2026.csv` (o CI confere que o versionado é o gerado) |
 | `sbe_gen.py` | gerador de codecs SBE a partir de `schema/*.xml` (ADR-0017) |
 | `relatorio-bench.py` | transforma a saída de `motor-rv-bench` em relatório Markdown; com dois lados, dá o veredito de regressão do workflow `bench` |
+| `gate-local.sh` | pré-voo local fail-fast (`--quick` e `--full`) com formatação, testes, sanitizers e determinismo |
+| `quick-bench.sh` | executa o benchmark em modo rápido (`--rapido`) com comparação opcional contra baseline |
+| `setup-hooks.sh` | ativa os hooks git versionados em `scripts/hooks/` (pre-commit e post-commit) |
+| `commit-and-handoff.sh` | realiza commit atômico e sincronização de handoff no Focus Contract |

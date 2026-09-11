@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Git pre-commit hook para motor-rv
+# Garante que nenhum commit entre sem formatação estrita e com invariantes sem teste.
+
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+if [[ -d "$ROOT_DIR/.toolchain/bin" ]]; then
+    export PATH="$ROOT_DIR/.toolchain/bin:$PATH"
+fi
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# 1. Checar clang-format nos arquivos staged
+if command -v clang-format >/dev/null 2>&1; then
+    STAGED_FILES=()
+    while IFS= read -r f; do
+        [[ -n "$f" && -f "$f" && ( "$f" == *.cpp || "$f" == *.hpp ) ]] && STAGED_FILES+=("$f")
+    done < <(git diff --cached --name-only --diff-filter=ACM)
+
+    FORMAT_FAILURES=0
+    for f in "${STAGED_FILES[@]}"; do
+        if ! clang-format --dry-run --Werror "$f" >/dev/null 2>&1; then
+            echo -e "${RED}[pre-commit FALHA]${NC} Arquivo fora da formatação padrão: $f"
+            FORMAT_FAILURES=$((FORMAT_FAILURES + 1))
+        fi
+    done
+
+    if [[ "$FORMAT_FAILURES" -gt 0 ]]; then
+        echo -e "${RED}[pre-commit ABORTADO]${NC} Execute 'clang-format -i <arquivos>' e faça 'git add' antes de commitar."
+        exit 1
+    fi
+fi
+
+# 2. Checar invariantes se a árvore debug existir
+if [[ -d "$ROOT_DIR/build/debug" && -f "$ROOT_DIR/scripts/check_invariants.py" ]]; then
+    if ! python3 "$ROOT_DIR/scripts/check_invariants.py" "$ROOT_DIR/build/debug" >/dev/null 2>&1; then
+        echo -e "${RED}[pre-commit FALHA]${NC} Nem todos os invariantes possuem testes vinculados!"
+        echo "Execute: python3 scripts/check_invariants.py build/debug para detalhes."
+        exit 1
+    fi
+fi
+
+exit 0

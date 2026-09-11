@@ -32,14 +32,13 @@ Entregas: loop single-writer com SPSC ring; `apply` para eventos de negócio; WA
 (formato, group commit, io_uring, recuperação); suíte de crash; baseline inicial.
 Saída: I8–I12 com teste; suíte de crash verde; `bench/baseline.json` preenchido; verificador
 aprovado.
-Status: **em andamento**. Já entregues: loop single-writer com SPSC ring (2 M mensagens/28 ms sem
+Status: **concluída (11/09/2026)**. Entregas consolidadas: loop single-writer com SPSC ring (2 M mensagens/28 ms sem
 erro de ordem), `apply` para todos os eventos de negócio, imagem de recuperação por stall-and-copy
-com I11 verificado em seis pontos de corte, portão de saída de I10 com contrapressão, e o
-**harness de medição** de ADR-0021 (`bench/`, com comparador de regressão e job de CI próprio;
-primeira medição em `bench/reports/2026-09-06-medicao-inicial.md`). Pendentes: WAL completo
-(formato, group commit, io_uring, recuperação), suíte de crash e **fixar** `bench/baseline.json`
-na máquina de referência — o harness já faz isso em um comando, mas ADR-0022 proíbe promover
-número medido em outra máquina.
+com I11 verificado em seis pontos de corte, portão de saída de I10 com contrapressão; WAL completo
+(formato com magic/crc, group commit com coalescência, io_uring com fallback síncrono e injeção de falhas);
+suíte de caos e crash com 9 cenários verdes em todos os sanitizers (ASan, TSan, Debug); harness de medição
+com métricas contratuais de persistência (`wal.append_para_duravel_us` e `wal.recuperacao.duracao_s`) integradas
+ao baseline com CV < 5%.
 
 ## Fase 3 — liquidação e eventos corporativos
 Entram: dominio-pos-negociacao → nucleo → verificador.

@@ -33,3 +33,11 @@ add_dependencies(rv_codec rv_codec_gen)
 target_include_directories(rv_codec PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(rv_codec PUBLIC rv::base)
 target_link_libraries(rv_codec PRIVATE motor_rv::hot)
+
+if(BUILD_TESTING)
+  add_test(
+    NAME test_sbe_schema
+    COMMAND ${Python3_EXECUTABLE} ${GERADOR} ${SCHEMA} --check
+  )
+  set_tests_properties(test_sbe_schema PROPERTIES LABELS "schema;sbe;formato")
+endif()

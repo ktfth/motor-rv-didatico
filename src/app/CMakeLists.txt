@@ -5,3 +5,6 @@
 # e ao replay sem nenhuma diferença.
 add_executable(motor-rv-sim simulador_main.cpp)
 target_link_libraries(motor-rv-sim PRIVATE motor_rv::flags rv::core rv::ingress)
+
+add_executable(motor-rv-wal-inspect wal_inspect_main.cpp)
+target_link_libraries(motor-rv-wal-inspect PRIVATE motor_rv::flags rv::wal rv::core rv::base)
