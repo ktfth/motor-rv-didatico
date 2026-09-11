@@ -1,4 +1,4 @@
-# motor-rv
+# Motor de Renda Variável (motor-rv)
 
 [![CI](https://github.com/ktfth/motor-rv-didatico/actions/workflows/ci.yml/badge.svg)](https://github.com/ktfth/motor-rv-didatico/actions/workflows/ci.yml)
 [![Pages](https://github.com/ktfth/motor-rv-didatico/actions/workflows/pages.yml/badge.svg)](https://ktfth.github.io/motor-rv-didatico/)
