@@ -205,7 +205,7 @@ int main(int argc, char** argv) {
   rv::bench::Runner runner{cfg};
 
   rv::bench::Carga carga;
-  const bool precisa_carga = tem(suites, "nucleo") || tem(suites, "snapshot");
+  const bool precisa_carga = tem(suites, "nucleo") || tem(suites, "snapshot") || tem(suites, "wal");
   if (precisa_carga) {
     carga = rv::bench::gera_carga(dados, dias, negocios, investidores, semente, data_inicial);
     if (!carga.ok) {
@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
   if (tem(suites, "base")) rv::bench::registra_base(runner);
   if (tem(suites, "nucleo")) rv::bench::registra_nucleo(runner, carga);
   if (tem(suites, "snapshot")) rv::bench::registra_snapshot(runner, carga);
-  if (tem(suites, "wal")) rv::bench::registra_wal(runner, dir_wal);
+  if (tem(suites, "wal")) rv::bench::registra_wal(runner, carga, dir_wal);
 
   // O contrato antes de qualquer publicação: se uma suíte rodou e a série que alimenta uma métrica
   // obrigatória não está entre as registradas, o nome mudou de um lado só. Publicar assim daria um

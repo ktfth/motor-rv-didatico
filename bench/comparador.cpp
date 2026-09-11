@@ -217,6 +217,24 @@ void confere_campo(const DocumentoJson& baseline, const char* chave, uint64_t at
   v.motivo_carga += ")";
 }
 
+[[nodiscard]] double quantil_de(const Serie& s, const std::string& campo) noexcept {
+  uint64_t ns = 0;
+  if (campo == "p50") {
+    ns = s.p50;
+  } else if (campo == "p99") {
+    ns = s.p99;
+  } else if (campo == "p999") {
+    ns = s.p999;
+  } else if (campo == "max") {
+    ns = s.pmax;
+  }
+
+  if (s.forma == Forma::DuracaoUs) return static_cast<double>(ns) / 1'000.0;
+  if (s.forma == Forma::DuracaoMs) return static_cast<double>(ns) / 1'000'000.0;
+  if (s.forma == Forma::DuracaoS) return static_cast<double>(ns) / 1'000'000'000.0;
+  return static_cast<double>(ns);
+}
+
 }  // namespace
 
 Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series, double limiar_pct,
@@ -257,27 +275,69 @@ Veredito compara(const DocumentoJson& baseline, const std::vector<Serie>& series
       continue;
     }
 
-    const auto it = baseline.find(chave);
-    if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) {
-      v.sem_baseline.push_back(chave);
-      continue;
-    }
-    v.baseline_vazio = false;
+    if (m.forma == FormaValor::Escalar) {
+      const auto it = baseline.find(chave);
+      if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) {
+        v.sem_baseline.push_back(chave);
+        continue;
+      }
+      v.baseline_vazio = false;
 
-    Comparacao c;
-    c.chave = chave;
-    c.baseline = it->second.numero;
-    c.medido = s->mediana;
-    c.direcao = s->direcao;
-    if (c.baseline != 0.0) {
-      c.variacao_pct = 100.0 * (c.medido - c.baseline) / c.baseline;
+      Comparacao c;
+      c.chave = chave;
+      c.baseline = it->second.numero;
+      c.medido = s->mediana;
+      c.direcao = s->direcao;
+      if (c.baseline != 0.0) {
+        c.variacao_pct = 100.0 * (c.medido - c.baseline) / c.baseline;
+      }
+      // A direção é o que faz o sinal significar alguma coisa: −8 % em eventos/s é regressão; −8 %
+      // em milissegundos de snapshot é ganho.
+      c.regressao = (c.direcao == Direcao::MaiorMelhor) ? (c.variacao_pct < -limiar_pct)
+                                                        : (c.variacao_pct > limiar_pct);
+      if (c.regressao) v.houve_regressao = true;
+      v.comparacoes.push_back(c);
+    } else if (m.forma == FormaValor::Objeto) {
+      if (!s->tem_quantis) {
+        v.nao_comparadas.push_back(chave + " (série sem quantis)");
+        continue;
+      }
+      std::string campo;
+      const auto compara_subcampo = [&](const std::string& sc) {
+        const std::string subchave = chave + "." + sc;
+        const auto it = baseline.find(subchave);
+        if (it == baseline.end() || it->second.tipo != ValorJson::Tipo::Numero) {
+          v.sem_baseline.push_back(subchave);
+          return;
+        }
+        v.baseline_vazio = false;
+
+        Comparacao c;
+        c.chave = subchave;
+        c.baseline = it->second.numero;
+        c.medido = quantil_de(*s, sc);
+        c.direcao = s->direcao;
+        if (c.baseline != 0.0) {
+          c.variacao_pct = 100.0 * (c.medido - c.baseline) / c.baseline;
+        }
+        c.regressao = (c.direcao == Direcao::MaiorMelhor) ? (c.variacao_pct < -limiar_pct)
+                                                          : (c.variacao_pct > limiar_pct);
+        if (c.regressao) v.houve_regressao = true;
+        v.comparacoes.push_back(c);
+      };
+
+      for (const char* p = m.subcampos; *p != '\0'; ++p) {
+        if (*p == ',') {
+          if (!campo.empty()) {
+            compara_subcampo(campo);
+            campo.clear();
+          }
+        } else {
+          campo += *p;
+        }
+      }
+      if (!campo.empty()) compara_subcampo(campo);
     }
-    // A direção é o que faz o sinal significar alguma coisa: −8 % em eventos/s é regressão; −8 %
-    // em milissegundos de snapshot é ganho.
-    c.regressao = (c.direcao == Direcao::MaiorMelhor) ? (c.variacao_pct < -limiar_pct)
-                                                      : (c.variacao_pct > limiar_pct);
-    if (c.regressao) v.houve_regressao = true;
-    v.comparacoes.push_back(c);
   }
   return v;
 }

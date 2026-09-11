@@ -132,6 +132,8 @@ const char* unidade_de(Forma f) noexcept {
       return "us";
     case Forma::DuracaoMs:
       return "ms";
+    case Forma::DuracaoS:
+      return "s";
     case Forma::Tamanho:
       return "bytes";
   }
@@ -183,6 +185,8 @@ namespace {
       return ops > 0.0 ? ns / ops / 1'000.0 : 0.0;
     case Forma::DuracaoMs:
       return ops > 0.0 ? ns / ops / 1'000'000.0 : 0.0;
+    case Forma::DuracaoS:
+      return ops > 0.0 ? ns / ops / 1'000'000'000.0 : 0.0;
     case Forma::Tamanho:
       return ops;
   }

@@ -14,8 +14,13 @@
 # nem isso (CODING_RULES §10).
 add_library(rv_wal STATIC
   block_align.cpp
+  epoch.cpp
+  group_commit.cpp
   io_uring_backend.cpp
   pwrite_backend.cpp
+  recovery.cpp
+  segment.cpp
+  segment_reader.cpp
 )
 add_library(rv::wal ALIAS rv_wal)
 
@@ -25,6 +30,6 @@ target_include_directories(rv_wal PUBLIC ${CMAKE_SOURCE_DIR}/src)
 # teste dos backends) compila contra o cabeçalho. Os outros arquivos do WAL não o veem — é o
 # ponto de ter um cabeçalho separado por backend.
 target_link_libraries(rv_wal
-  PUBLIC rv::base PkgConfig::URING
+  PUBLIC rv::base rv::core PkgConfig::URING
 )
 target_link_libraries(rv_wal PRIVATE motor_rv::hot)

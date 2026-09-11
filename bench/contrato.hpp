@@ -50,6 +50,8 @@ namespace rv::bench {
 inline constexpr const char* kSerieNucleoLoop = "nucleo.loop.eventos_por_s_por_core";
 inline constexpr const char* kSerieNucleoApply = "nucleo.apply.eventos_por_s";
 inline constexpr const char* kSerieSnapshotSalva = "snapshot.salva.duracao_ms";
+inline constexpr const char* kSerieWalAppendParaDuravel = "wal.append_para_duravel_us";
+inline constexpr const char* kSerieWalRecuperacao = "wal.recuperacao.duracao_s";
 
 // A forma do valor no JSON. Não é enfeite de emissão: é o que permite `escreve_json` gerar o
 // bloco `metricas` a partir da tabela em vez de o ter digitado em prosa, com os `null` literais
@@ -81,36 +83,33 @@ inline constexpr Metrica kEsquemaMetricas[] = {
      .subcampos = nullptr,
      .motivo = nullptr},
     {.chave = "wal.append_para_duravel_us",
-     .grupo = "",
-     .serie = nullptr,
+     .grupo = "wal",
+     .serie = kSerieWalAppendParaDuravel,
      .rotulo = "Tempo entre gravar um evento e ele estar seguro no disco",
      .forma = FormaValor::Objeto,
      .subcampos = "p50,p99,p999",
-     .motivo = "o escritor do WAL (segment/group_commit/wal) não existe ainda; só o formato e os "
-               "backends. O piso físico do dispositivo está nas séries wal.*_backend_*"},
+     .motivo = nullptr},
     {.chave = "wal.tamanho_grupo_bytes",
      .grupo = "",
      .serie = nullptr,
      .rotulo = "Quantos bytes cada grupo de gravação junta antes de ir ao disco",
      .forma = FormaValor::Objeto,
      .subcampos = "p50,p99",
-     .motivo = "não há group commit para agrupar: mesma pendência"},
+     .motivo = "aguarda amostragem de distribuição de tamanho de grupo na fase 3"},
     {.chave = "wal.grupos_em_voo",
      .grupo = "",
      .serie = nullptr,
      .rotulo = "Quantos grupos de gravação ficam esperando o disco ao mesmo tempo",
      .forma = FormaValor::Objeto,
      .subcampos = "p50,max",
-     .motivo = "não há group commit: mesma pendência"},
+     .motivo = "aguarda amostragem de grupos em voo na fase 3"},
     {.chave = "wal.recuperacao_s",
-     .grupo = "",
-     .serie = nullptr,
+     .grupo = "wal",
+     .serie = kSerieWalRecuperacao,
      .rotulo = "Tempo para o motor voltar ao ar relendo o log depois de uma queda",
      .forma = FormaValor::Escalar,
      .subcampos = nullptr,
-     .motivo = "não há wal/recovery.cpp; a velocidade de reaplicação está em "
-               "nucleo.apply.eventos_por_s, que é o limite superior (sem custo de leitura de "
-               "disco)"},
+     .motivo = nullptr},
     {.chave = "snapshot.duracao_ms",
      .grupo = "snapshot",
      .serie = kSerieSnapshotSalva,
@@ -202,10 +201,9 @@ inline constexpr SerieBloqueante kSeriesBloqueantes[] = {
     // saber qual suíte deveria tê-la produzido.
     if (m.serie != nullptr && *m.grupo == '\0') return false;
     if ((m.forma == FormaValor::Objeto) == (m.subcampos == nullptr)) return false;
-    // `escreve_json` só sabe preencher escalar. Dar uma série a uma métrica de quantis sem
-    // ensinar o emissor a escrevê-la publicaria um objeto de nulos ao lado de uma série medida —
-    // exatamente o silêncio que esta tabela existe para impedir. Quebrar aqui é o aviso.
-    if (m.forma != FormaValor::Escalar && m.serie != nullptr) return false;
+    // `escreve_json` e `compara` suportam Escalar e Objeto (quantis). Mapa não tem emissor de
+    // série ainda.
+    if (m.forma == FormaValor::Mapa && m.serie != nullptr) return false;
   }
   return true;
 }

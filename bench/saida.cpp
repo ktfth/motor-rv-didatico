@@ -102,6 +102,24 @@ void objeto_de_nulos(std::FILE* f, const char* subcampos) {
   (void)std::fputs(" }", f);
 }
 
+[[nodiscard]] double quantil_de(const Serie& s, const std::string& campo) noexcept {
+  uint64_t ns = 0;
+  if (campo == "p50") {
+    ns = s.p50;
+  } else if (campo == "p99") {
+    ns = s.p99;
+  } else if (campo == "p999") {
+    ns = s.p999;
+  } else if (campo == "max") {
+    ns = s.pmax;
+  }
+
+  if (s.forma == Forma::DuracaoUs) return static_cast<double>(ns) / 1'000.0;
+  if (s.forma == Forma::DuracaoMs) return static_cast<double>(ns) / 1'000'000.0;
+  if (s.forma == Forma::DuracaoS) return static_cast<double>(ns) / 1'000'000'000.0;
+  return static_cast<double>(ns);
+}
+
 // Uma série só vira número de baseline se foi medida E ficou estável. É a regra de ADR-0021
 // aplicada no ponto onde ela vale: na escrita do arquivo, não na cabeça de quem lê o terminal.
 [[nodiscard]] bool publicavel(const Serie* s) noexcept {
@@ -173,9 +191,35 @@ void escreve_metricas(std::FILE* f, const std::vector<Serie>& series) {
         }
         break;
       }
-      case FormaValor::Objeto:
-        objeto_de_nulos(f, m.subcampos);
+      case FormaValor::Objeto: {
+        const Serie* s = serie_de(series, m.serie);
+        if (publicavel(s) && s->tem_quantis) {
+          (void)std::fputs("{", f);
+          bool primeiro = true;
+          std::string campo;
+          const auto emite_campo = [&] {
+            if (campo.empty()) return;
+            (void)std::fputs(primeiro ? " " : ", ", f);
+            primeiro = false;
+            escapa(f, campo);
+            (void)std::fputs(": ", f);
+            numero(f, quantil_de(*s, campo));
+            campo.clear();
+          };
+          for (const char* p = m.subcampos; *p != '\0'; ++p) {
+            if (*p == ',') {
+              emite_campo();
+            } else {
+              campo += *p;
+            }
+          }
+          emite_campo();
+          (void)std::fputs(" }", f);
+        } else {
+          objeto_de_nulos(f, m.subcampos);
+        }
         break;
+      }
       case FormaValor::Mapa:
         (void)std::fputs("{}", f);
         break;

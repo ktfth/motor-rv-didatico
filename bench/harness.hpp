@@ -72,6 +72,7 @@ enum class Forma : uint8_t {
   DuracaoNs,  // nanossegundos por operação; menor é melhor
   DuracaoUs,  // microssegundos por operação; menor é melhor
   DuracaoMs,  // milissegundos por operação; menor é melhor
+  DuracaoS,   // segundos por operação; menor é melhor
   Tamanho,    // o valor É `operacoes` (bytes); o tempo é ignorado; menor é melhor
 };
 

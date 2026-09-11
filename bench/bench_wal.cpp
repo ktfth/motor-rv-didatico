@@ -27,6 +27,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -35,11 +37,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "base/arena.hpp"
+#include "base/metrics.hpp"
+#include "bench/contrato.hpp"
 #include "bench/harness.hpp"
+#include "bench/nucleo_bench.hpp"
 #include "bench/suites.hpp"
+#include "core/apply.hpp"
+#include "core/partition_state.hpp"
 #include "wal/io_backend.hpp"
 #include "wal/io_uring_backend.hpp"
 #include "wal/pwrite_backend.hpp"
+#include "wal/recovery.hpp"
+#include "wal/wal.hpp"
 
 namespace rv::bench {
 namespace {
@@ -143,7 +153,7 @@ constexpr Cenario kCenarios[] = {
 
 }  // namespace
 
-void registra_wal(Runner& r, const std::string& dir) {
+void registra_wal(Runner& r, const Carga& carga, const std::string& dir) {
   ArquivoTemporario arq{dir};
   std::string erro;
   if (!arq.abre(erro)) {
@@ -151,6 +161,8 @@ void registra_wal(Runner& r, const std::string& dir) {
       (void)r.pula("wal", c.nome_pwrite, Forma::DuracaoUs, erro);
       (void)r.pula("wal", c.nome_uring, Forma::DuracaoUs, erro);
     }
+    (void)r.pula("wal", kSerieWalAppendParaDuravel, Forma::DuracaoUs, erro);
+    (void)r.pula("wal", kSerieWalRecuperacao, Forma::DuracaoS, erro);
     return;
   }
   const std::string nota_direto =
@@ -165,6 +177,8 @@ void registra_wal(Runner& r, const std::string& dir) {
       (void)r.pula("wal", c.nome_pwrite, Forma::DuracaoUs, "posix_memalign falhou");
       (void)r.pula("wal", c.nome_uring, Forma::DuracaoUs, "posix_memalign falhou");
     }
+    (void)r.pula("wal", kSerieWalAppendParaDuravel, Forma::DuracaoUs, "posix_memalign falhou");
+    (void)r.pula("wal", kSerieWalRecuperacao, Forma::DuracaoS, "posix_memalign falhou");
     return;
   }
 
@@ -214,44 +228,155 @@ void registra_wal(Runner& r, const std::string& dir) {
         (void)r.pula("wal", c.nome_uring, Forma::DuracaoUs,
                      "io_uring indisponível nesta máquina (kernel, seccomp ou contêiner)");
       }
-      return;
-    }
-    const bool pronto = be.register_files(std::span<const int>{fds, 1}).is_ok() &&
-                        be.register_buffers(std::span<const MutBytes>{bufs, 1}).is_ok();
-    const std::string nota_ring =
-        nota_direto + (be.defer_taskrun() ? ", DEFER_TASKRUN=on" : ", DEFER_TASKRUN=off") +
-        (be.single_issuer() ? ", SINGLE_ISSUER=on" : ", SINGLE_ISSUER=off");
+    } else {
+      const bool pronto = be.register_files(std::span<const int>{fds, 1}).is_ok() &&
+                          be.register_buffers(std::span<const MutBytes>{bufs, 1}).is_ok();
+      const std::string nota_ring =
+          nota_direto + (be.defer_taskrun() ? ", DEFER_TASKRUN=on" : ", DEFER_TASKRUN=off") +
+          (be.single_issuer() ? ", SINGLE_ISSUER=on" : ", SINGLE_ISSUER=off");
 
-    for (const Cenario& c : kCenarios) {
-      if (!pronto) {
-        (void)r.pula("wal", c.nome_uring, Forma::DuracaoUs,
-                     "registro de arquivo/buffer no ring falhou");
-        continue;
-      }
-      (void)r.medir_latencia("wal", c.nome_uring, Forma::DuracaoUs, [&be, &buf, &c](Histogram& h) {
-        uint64_t off = 0;
-        uint64_t n = 0;
-        const uint64_t t0 = agora_ns();
-        for (uint32_t i = 0; i < kEscritasPorRepeticao; ++i) {
-          wal::WriteRequest req{};
-          req.buf = buf.dados();
-          req.offset = off;
-          req.token = i + 1;
-          req.len = c.bytes;
-          req.buf_idx = 0;
-          req.file_idx = 0;
-          const uint64_t a0 = agora_ns();
-          if (!escreve_e_colhe(be, req)) break;
-          h.record(agora_ns() - a0);
-          off += c.bytes;
-          if (off + c.bytes > kArquivoBytes) off = 0;
-          ++n;
+      for (const Cenario& c : kCenarios) {
+        if (!pronto) {
+          (void)r.pula("wal", c.nome_uring, Forma::DuracaoUs,
+                       "registro de arquivo/buffer no ring falhou");
+          continue;
         }
-        return Amostra{n, agora_ns() - t0};
-      });
-      r.anota(nota_ring);
+        (void)r.medir_latencia("wal", c.nome_uring, Forma::DuracaoUs,
+                               [&be, &buf, &c](Histogram& h) {
+                                 uint64_t off = 0;
+                                 uint64_t n = 0;
+                                 const uint64_t t0 = agora_ns();
+                                 for (uint32_t i = 0; i < kEscritasPorRepeticao; ++i) {
+                                   wal::WriteRequest req{};
+                                   req.buf = buf.dados();
+                                   req.offset = off;
+                                   req.token = i + 1;
+                                   req.len = c.bytes;
+                                   req.buf_idx = 0;
+                                   req.file_idx = 0;
+                                   const uint64_t a0 = agora_ns();
+                                   if (!escreve_e_colhe(be, req)) break;
+                                   h.record(agora_ns() - a0);
+                                   off += c.bytes;
+                                   if (off + c.bytes > kArquivoBytes) off = 0;
+                                   ++n;
+                                 }
+                                 return Amostra{n, agora_ns() - t0};
+                               });
+        r.anota(nota_ring);
+      }
     }
   }
+
+  // ------------------------------------------------------------------ WAL de alto nível
+  if (carga.eventos.empty()) {
+    (void)r.pula("wal", kSerieWalAppendParaDuravel, Forma::DuracaoUs, "carga vazia");
+    (void)r.pula("wal", kSerieWalRecuperacao, Forma::DuracaoS, "carga vazia");
+    return;
+  }
+
+  // 1. Latência append -> durável com group commit
+  const std::string dir_append = dir + "/motor-rv-bench-wal-append";
+  std::error_code ec;
+  std::filesystem::remove_all(dir_append, ec);
+  std::filesystem::create_directories(dir_append, ec);
+
+  (void)r.medir_latencia("wal", kSerieWalAppendParaDuravel, Forma::DuracaoUs, [&](Histogram& h) {
+    std::filesystem::remove_all(dir_append, ec);
+    std::filesystem::create_directories(dir_append, ec);
+
+    wal::PwriteBackend be;
+    wal::Wal wal{be};
+    wal::WalOptions opts{};
+    opts.dir = dir_append.c_str();
+    opts.partition = PartitionId{0};
+    opts.block_size = 4096;
+    opts.direct = arq.direto();
+    opts.window_ns = 100'000;
+
+    if (wal.open(opts).is_error()) {
+      return Amostra{0, 0};
+    }
+
+    uint64_t n_eventos = 0;
+    const uint64_t t0 = agora_ns();
+    constexpr uint32_t kLoteRajada = 16;
+    constexpr uint32_t kTotalLotes = 25;  // 400 eventos
+    const size_t total_carga = carga.eventos.size();
+    uint64_t t_evs[kLoteRajada]{};
+
+    for (uint32_t lote = 0; lote < kTotalLotes; ++lote) {
+      for (uint32_t i = 0; i < kLoteRajada; ++i) {
+        const size_t idx = (lote * kLoteRajada + i) % total_carga;
+        const auto& ev = carga.eventos[idx];
+        t_evs[i] = agora_ns();
+        auto app = wal.append(ev.tmpl, ByteSpan{ev.bytes, ev.len}, t_evs[i]);
+        if (!app.is_ok()) break;
+        ++n_eventos;
+      }
+      if (wal.force_commit(agora_ns()).is_error()) break;
+      const uint64_t t_duravel = agora_ns();
+      for (uint32_t i = 0; i < kLoteRajada; ++i) {
+        h.record(t_duravel - t_evs[i]);
+      }
+    }
+
+    wal.close();
+    return Amostra{n_eventos, agora_ns() - t0};
+  });
+  r.anota(std::string("append -> durável com group commit (") +
+          (arq.direto() ? "O_DIRECT" : "page cache") + ")");
+  std::filesystem::remove_all(dir_append, ec);
+
+  // 2. Tempo de recuperação a partir de log pré-gravado com a carga
+  const std::string dir_rec = dir + "/motor-rv-bench-wal-rec";
+  std::filesystem::remove_all(dir_rec, ec);
+  std::filesystem::create_directories(dir_rec, ec);
+
+  bool log_preparado = false;
+  {
+    wal::PwriteBackend be;
+    wal::Wal wal{be};
+    wal::WalOptions opts{};
+    opts.dir = dir_rec.c_str();
+    opts.partition = PartitionId{0};
+    opts.block_size = 4096;
+    opts.direct = arq.direto();
+    opts.window_ns = 100'000;
+    if (wal.open(opts).is_ok()) {
+      const size_t limite = carga.eventos.size();
+      for (size_t i = 0; i < limite; ++i) {
+        const auto& ev = carga.eventos[i];
+        (void)wal.append(ev.tmpl, ByteSpan{ev.bytes, ev.len}, agora_ns());
+      }
+      (void)wal.force_commit(agora_ns());
+      wal.close();
+      log_preparado = true;
+    }
+  }
+
+  if (!log_preparado) {
+    (void)r.pula("wal", kSerieWalRecuperacao, Forma::DuracaoS,
+                 "falha ao preparar log de recuperação");
+  } else {
+    auto mem_rec = std::make_shared<std::vector<std::byte>>(kArenaDeMedicao);
+    const core::PartitionCapacity cap = capacidade_de_medicao();
+
+    (void)r.medir("wal", kSerieWalRecuperacao, Forma::DuracaoS, [&] {
+      Arena arena{mem_rec->data(), mem_rec->size()};
+      core::PartitionState state{};
+      if (!state.init(arena, PartitionId{0}, cap)) return Amostra{0, 0};
+
+      wal::WalTail tail{};
+      Metrics m{};
+      const uint64_t t0 = agora_ns();
+      auto res = wal::recover(state, arena, m, dir_rec.c_str(), PartitionId{0}, tail);
+      const uint64_t dt = agora_ns() - t0;
+      return (res.is_ok() && res->records_applied > 0) ? Amostra{1, dt} : Amostra{0, dt};
+    });
+    r.anota("tempo para recover reler log e reproduzir o estado da partição");
+  }
+  std::filesystem::remove_all(dir_rec, ec);
 }
 
 }  // namespace rv::bench

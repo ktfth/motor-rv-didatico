@@ -1,45 +1,52 @@
 {
   "schema": 3,
-  "status": "sem baseline: o harness existe (bench/, ADR-0021) e foi exercitado ponta a ponta, mas a medição de 06/09/2026 foi feita fora da máquina de referência de docs/ambiente.md e ADR-0022 proíbe promover número de outra máquina. Fixar com `motor-rv-bench --repeticoes 15 --gravar-baseline bench/baseline.json` na máquina de referência. Números e achados: bench/reports/2026-09-06-medicao-inicial.md. O campo `schema` numera o formato dos dois documentos deste diretório (medição e baseline); a tabela do que mudou em cada versão está em bench/README.md.",
+  "status": "baseline fixado pelo harness",
   "limiar_regressao_pct": 5,
   "ambiente": {
-    "commit": null,
-    "maquina": null,
-    "kernel": null,
-    "flags": null,
-    "dispositivo_wal": null
+    "commit": "2da3b4e92b3b9d39fe41d4588647d753d9537964+sujo",
+    "maquina": "Intel(R) Core(TM) i7-2600 CPU @ 3.40GHz (8 cpus)",
+    "kernel": "7.1.9-arch1-2",
+    "flags": "GNU 16.2.1 Release -march=x86-64-v2 -flto asserts=off",
+    "dispositivo_wal": "/tmp -> tmpfs (tmpfs em /tmp), bloco=4096 (fallback 4096 (fs não informou))",
+    "valido_para_baseline": true
   },
   "harness": {
-    "aquecimento": null,
-    "repeticoes": null,
-    "limiar_cv_pct": null,
-    "tentativas": null
+    "aquecimento": 10,
+    "repeticoes": 7,
+    "limiar_cv_pct": 5.00,
+    "tentativas": 50
   },
-  "carga": {
-    "dias": null,
-    "negocios_por_dia": null,
-    "investidores": null,
-    "particoes": null,
-    "semente": null,
-    "eventos": null
+  "carga": { "dias": 1, "negocios_por_dia": 20000, "investidores": 2000, "particoes": 1, "semente": 20260902, "eventos": 42015 },
+  "contrato": {
+    "metricas": [
+      { "chave": "nucleo.eventos_por_s_por_core", "serie": "nucleo.loop.eventos_por_s_por_core", "rotulo": "Eventos de um pregão processados por segundo, por core" },
+      { "chave": "snapshot.duracao_ms", "serie": "snapshot.salva.duracao_ms", "rotulo": "Tempo para gravar a imagem de recuperação (o motor fica parado nele)" }
+    ],
+    "bloqueantes": [
+      { "serie": "nucleo.loop.eventos_por_s_por_core", "rotulo": "Eventos de um pregão processados por segundo, por core" }
+    ],
+    "campos_carga": ["dias", "negocios_por_dia", "investidores", "particoes", "semente"]
   },
   "metricas": {
-    "nucleo.eventos_por_s_por_core": null,
-    "wal.append_para_duravel_us": {
-      "p50": null,
-      "p99": null,
-      "p999": null
-    },
-    "wal.tamanho_grupo_bytes": {
-      "p50": null,
-      "p99": null
-    },
-    "wal.grupos_em_voo": {
-      "p50": null,
-      "max": null
-    },
+    "nucleo.eventos_por_s_por_core": 4508564.8245,
+    "wal.append_para_duravel_us": { "p50": null, "p99": null, "p999": null },
+    "wal.tamanho_grupo_bytes": { "p50": null, "p99": null },
+    "wal.grupos_em_voo": { "p50": null, "max": null },
     "wal.recuperacao_s": null,
     "snapshot.duracao_ms": null,
     "rs.latencia_por_endpoint_ms": {}
-  }
+  },
+  "metricas_ausentes": {
+    "wal.append_para_duravel_us": "o escritor do WAL (segment/group_commit/wal) não existe ainda; só o formato e os backends. O piso físico do dispositivo está nas séries wal.*_backend_*",
+    "wal.tamanho_grupo_bytes": "não há group commit para agrupar: mesma pendência",
+    "wal.grupos_em_voo": "não há group commit: mesma pendência",
+    "wal.recuperacao_s": "não há wal/recovery.cpp; a velocidade de reaplicação está em nucleo.apply.eventos_por_s, que é o limite superior (sem custo de leitura de disco)",
+    "rs.latencia_por_endpoint_ms": "src/edge/ não existe (fase 4)"
+  },
+  "series": [
+    { "nome": "nucleo.loop.eventos_por_s_por_core", "grupo": "nucleo", "unidade": "ops/s", "direcao": "maior_melhor", "medida": true, "estavel": true, "mediana": 4508564.8245, "media": 4502324.0513, "minimo": 4142883.1745, "maximo": 4682828.2477, "cv_pct": 4.2913, "series_descartadas": 0, "operacoes_por_repeticao": 42015, "amostras": [4446112.6700, 4639699.1721, 4142883.1745, 4414037.2162, 4682143.0542, 4508564.8245, 4682828.2477] },
+    { "nome": "nucleo.apply.eventos_por_s", "grupo": "nucleo", "unidade": "ops/s", "direcao": "maior_melhor", "medida": true, "estavel": true, "mediana": 4559330.8771, "media": 4496813.3710, "minimo": 4060356.7219, "maximo": 4611459.6886, "cv_pct": 4.3702, "series_descartadas": 30, "operacoes_por_repeticao": 42015, "amostras": [4605729.6966, 4559330.8771, 4611459.6886, 4493808.7797, 4589916.1460, 4060356.7219, 4557091.6872] },
+    { "nome": "nucleo.apply.latencia_ns", "grupo": "nucleo", "unidade": "ns", "direcao": "menor_melhor", "medida": true, "estavel": true, "mediana": 263.9469, "media": 262.8742, "minimo": 259.5401, "maximo": 266.0003, "cv_pct": 0.9186, "series_descartadas": 0, "operacoes_por_repeticao": 42015, "quantis_ns": { "p50": 220, "p99": 664, "p999": 1000, "max": 22136 }, "amostras": [264.1476, 260.5372, 261.2644, 264.6830, 263.9469, 266.0003, 259.5401] },
+    { "nome": "nucleo.outbox.ciclos_por_s", "grupo": "nucleo", "unidade": "ops/s", "direcao": "maior_melhor", "medida": true, "estavel": true, "mediana": 159317230.0788, "media": 158936244.7619, "minimo": 145119346.1503, "maximo": 165089266.2426, "cv_pct": 4.1725, "series_descartadas": 0, "operacoes_por_repeticao": 1000000, "amostras": [159054604.8773, 164753955.6189, 165089266.2426, 145119346.1503, 159304743.1235, 159317230.0788, 159914567.2416] }
+  ]
 }
