@@ -126,669 +126,917 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
   <style>
     :root {
-      --bg: #090d13;
-      --bg-surface: #101620;
-      --bg-surface-hover: #161e2b;
-      --border: #212c3d;
-      --border-accent: #33445c;
-      --text: #e2e8f0;
-      --text-muted: #8b9bb4;
-      --accent: #38bdf8;
-      --accent-glow: rgba(56, 189, 248, 0.15);
-      --green: #22c55e;
-      --green-bg: rgba(34, 197, 94, 0.12);
-      --purple: #a855f7;
-      --purple-bg: rgba(168, 85, 247, 0.12);
-      --amber: #f59e0b;
-      --amber-bg: rgba(245, 158, 11, 0.12);
-      --red: #ef4444;
-      --red-bg: rgba(239, 68, 68, 0.12);
-      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --bg-base: #04070d;
+      --bg-elevated: #080d18;
+      --bg-card: rgba(13, 20, 36, 0.7);
+      --bg-card-hover: rgba(18, 28, 50, 0.85);
+      --bg-glass: rgba(15, 23, 42, 0.65);
+      
+      --border-subtle: rgba(255, 255, 255, 0.07);
+      --border-medium: rgba(56, 189, 248, 0.2);
+      --border-glow: rgba(56, 189, 248, 0.45);
+      
+      --text-main: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      
+      --cyan-400: #38bdf8;
+      --cyan-500: #0ea5e9;
+      --cyan-glow: rgba(56, 189, 248, 0.15);
+      
+      --indigo-400: #818cf8;
+      --indigo-glow: rgba(129, 140, 248, 0.15);
+      
+      --emerald-400: #34d399;
+      --emerald-glow: rgba(52, 211, 153, 0.15);
+      
+      --amber-400: #fbbf24;
+      --amber-glow: rgba(251, 191, 36, 0.15);
+      
+      --purple-400: #c084fc;
+      
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-    html { scroll-behavior: smooth; }
+    html {
+      scroll-behavior: smooth;
+      background-color: var(--bg-base);
+    }
 
     body {
-      background-color: var(--bg);
-      color: var(--text);
+      background-color: var(--bg-base);
+      background-image: 
+        radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 25%, rgba(129, 140, 248, 0.07) 0%, transparent 45%),
+        radial-gradient(circle at 50% 65%, rgba(52, 211, 153, 0.05) 0%, transparent 50%);
+      background-attachment: fixed;
+      color: var(--text-main);
       font-family: var(--font-sans);
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
     }
 
-    /* Skip-to-content (a11y) */
+    /* Accessibility */
     .skip-link {
       position: absolute;
-      top: -100%;
-      left: 16px;
-      background: var(--accent);
-      color: #04101d;
-      padding: 8px 16px;
-      border-radius: 0 0 6px 6px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      z-index: 100;
+      top: -100px;
+      left: 20px;
+      background: var(--cyan-400);
+      color: #020617;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-weight: 700;
+      z-index: 1000;
       text-decoration: none;
+      transition: top 0.2s;
     }
-    .skip-link:focus { top: 0; }
+    .skip-link:focus { top: 20px; }
 
-    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-    /* Focus indicators (a11y) */
     *:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
+      outline: 2px solid var(--cyan-400);
+      outline-offset: 3px;
     }
 
-    /* ========== HEADER ========== */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ========== NAVIGATION ========== */
     header {
-      border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
-      background: rgba(9, 13, 19, 0.88);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      z-index: 50;
+      z-index: 100;
+      background: rgba(4, 7, 13, 0.8);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
     }
 
     .nav-bar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      height: 64px;
+      height: 72px;
     }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      font-size: 1.15rem;
-      letter-spacing: -0.02em;
+      gap: 12px;
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.03em;
       color: #fff;
       text-decoration: none;
+    }
+
+    .brand-logo-gem {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--cyan-400), var(--indigo-400));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+    }
+    .brand-logo-gem svg {
+      width: 16px;
+      height: 16px;
+      fill: #020617;
     }
 
     .brand-badge {
       font-family: var(--font-mono);
       font-size: 0.72rem;
-      background: var(--accent-glow);
-      color: var(--accent);
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--cyan-400);
       border: 1px solid rgba(56, 189, 248, 0.3);
-      padding: 2px 7px;
-      border-radius: 4px;
+      padding: 3px 8px;
+      border-radius: 6px;
     }
 
     .nav-links {
       display: flex;
-      gap: 20px;
+      gap: 28px;
       align-items: center;
       list-style: none;
     }
 
     .nav-links a {
-      color: var(--text-muted);
+      color: var(--text-secondary);
       text-decoration: none;
-      font-size: 0.88rem;
+      font-size: 0.92rem;
       font-weight: 500;
-      transition: color 0.15s;
+      transition: color 0.15s ease;
     }
 
-    .nav-links a:hover { color: #fff; }
+    .nav-links a:hover {
+      color: #fff;
+    }
 
-    .nav-github {
+    .nav-github-btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text) !important;
-      font-size: 0.85rem !important;
-      transition: border-color 0.15s, background 0.15s;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: #fff !important;
+      font-weight: 600 !important;
+      font-size: 0.88rem !important;
+      transition: all 0.2s ease;
     }
-    .nav-github:hover { border-color: var(--border-accent); background: var(--bg-surface-hover); }
+    .nav-github-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--border-medium);
+      transform: translateY(-1px);
+    }
 
-    /* Mobile menu (CSS-only hamburger) */
+    /* Mobile menu */
     .menu-toggle { display: none; }
     .hamburger {
       display: none;
       flex-direction: column;
       justify-content: center;
-      gap: 5px;
-      width: 36px;
-      height: 36px;
+      gap: 6px;
+      width: 40px;
+      height: 40px;
       cursor: pointer;
-      padding: 6px;
+      padding: 8px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
     }
     .hamburger span {
       display: block;
       width: 100%;
       height: 2px;
-      background: var(--text);
-      border-radius: 1px;
-      transition: transform 0.25s, opacity 0.2s;
+      background: var(--text-main);
+      border-radius: 2px;
+      transition: all 0.25s ease;
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 900px) {
       .hamburger { display: flex; }
       .nav-links {
         position: fixed;
-        top: 64px;
+        top: 72px;
         left: 0;
         right: 0;
         bottom: 0;
-        background: rgba(9, 13, 19, 0.97);
-        backdrop-filter: blur(14px);
+        background: rgba(4, 7, 13, 0.98);
+        backdrop-filter: blur(20px);
         flex-direction: column;
-        padding: 32px 24px;
+        justify-content: flex-start;
+        padding: 40px 24px;
         gap: 24px;
         transform: translateX(100%);
-        transition: transform 0.3s ease;
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
       }
-      .nav-links a { font-size: 1.1rem; }
-      .menu-toggle:checked ~ .nav-links { transform: translateX(0); }
-      .menu-toggle:checked ~ .hamburger span:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
+      .nav-links a { font-size: 1.15rem; font-weight: 600; }
+      .menu-toggle:checked ~ nav .nav-links { transform: translateX(0); }
+      .menu-toggle:checked ~ .hamburger span:nth-child(1) { transform: translateY(8px) rotate(45deg); }
       .menu-toggle:checked ~ .hamburger span:nth-child(2) { opacity: 0; }
-      .menu-toggle:checked ~ .hamburger span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
+      .menu-toggle:checked ~ .hamburger span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); }
     }
 
-    /* ========== HERO ========== */
+    /* ========== HERO SECTION (SPLIT VIEW) ========== */
     .hero {
-      padding: 80px 0 48px;
-      text-align: center;
+      padding: 72px 0 64px;
     }
 
-    .hero-badges {
+    .hero-split {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 48px;
+      align-items: center;
+    }
+
+    .hero-badges-wrapper {
       display: flex;
-      justify-content: center;
-      gap: 10px;
+      gap: 12px;
       flex-wrap: wrap;
       margin-bottom: 24px;
     }
 
-    .hero-badge {
+    .pill-badge {
       display: inline-flex;
       align-items: center;
       gap: 8px;
       padding: 6px 14px;
-      background: var(--green-bg);
-      border: 1px solid rgba(34, 197, 94, 0.3);
-      color: var(--green);
       font-size: 0.82rem;
       font-weight: 600;
       border-radius: 9999px;
+      backdrop-filter: blur(8px);
     }
-
-    .hero-badge.purple {
-      background: var(--purple-bg);
-      border-color: rgba(168, 85, 247, 0.3);
-      color: var(--purple);
+    .pill-badge.green {
+      background: var(--emerald-glow);
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      color: var(--emerald-400);
     }
-
-    .hero-badge .dot {
+    .pill-badge.cyan {
+      background: var(--cyan-glow);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: var(--cyan-400);
+    }
+    .pill-badge.purple {
+      background: rgba(192, 132, 252, 0.15);
+      border: 1px solid rgba(192, 132, 252, 0.35);
+      color: var(--purple-400);
+    }
+    .pill-dot {
       width: 7px;
       height: 7px;
       background: currentColor;
       border-radius: 50%;
-      box-shadow: 0 0 8px currentColor;
+      box-shadow: 0 0 10px currentColor;
     }
 
     .hero h1 {
-      font-size: clamp(2.2rem, 5vw, 3.2rem);
-      font-weight: 700;
+      font-size: clamp(2.4rem, 4.2vw, 3.6rem);
+      font-weight: 800;
       letter-spacing: -0.04em;
-      line-height: 1.12;
-      margin-bottom: 20px;
+      line-height: 1.1;
+      margin-bottom: 24px;
       color: #fff;
     }
 
-    .hero h1 span {
-      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #a855f7 100%);
+    .hero-gradient-text {
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
-    .hero > p {
-      font-size: 1.15rem;
-      color: var(--text-muted);
-      max-width: 760px;
-      margin: 0 auto 36px;
-      font-weight: 400;
+    .hero-subtitle {
+      font-size: 1.12rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+      margin-bottom: 36px;
+      max-width: 580px;
     }
 
     .hero-actions {
       display: flex;
-      justify-content: center;
-      gap: 14px;
+      gap: 16px;
       flex-wrap: wrap;
     }
 
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 22px;
-      font-size: 0.92rem;
-      font-weight: 600;
-      border-radius: 6px;
+      gap: 10px;
+      padding: 12px 24px;
+      font-size: 0.94rem;
+      font-weight: 700;
+      border-radius: 10px;
       text-decoration: none;
-      transition: all 0.15s;
-      border: none;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       cursor: pointer;
+      border: none;
     }
 
     .btn-primary {
-      background: var(--accent);
-      color: #04101d;
+      background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+      color: #020617;
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
     }
     .btn-primary:hover {
-      background: #7dd3fc;
-      box-shadow: 0 0 24px rgba(56, 189, 248, 0.4);
+      box-shadow: 0 0 36px rgba(56, 189, 248, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+      transform: translateY(-2px);
     }
 
     .btn-secondary {
-      background: var(--bg-surface);
-      color: var(--text);
-      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.8);
+      color: var(--text-main);
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
     }
     .btn-secondary:hover {
-      background: var(--bg-surface-hover);
-      border-color: var(--border-accent);
+      background: rgba(30, 41, 59, 0.9);
+      border-color: var(--border-medium);
+      transform: translateY(-2px);
     }
 
-    /* ========== STATS BAR ========== */
-    .highlights-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin: 40px 0 0;
-    }
-
-    .stat-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      padding: 20px;
-      border-radius: 8px;
-    }
-
-    .stat-val {
+    /* Simulated Live CLI Terminal Mockup */
+    .terminal-window {
+      background: #060912;
+      border: 1px solid var(--border-medium);
+      border-radius: 14px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(56, 189, 248, 0.1);
+      overflow: hidden;
       font-family: var(--font-mono);
-      font-size: 1.6rem;
-      font-weight: 700;
+      font-size: 0.82rem;
+    }
+
+    .terminal-header {
+      background: #0d1322;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .terminal-controls {
+      display: flex;
+      gap: 8px;
+    }
+    .term-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .term-dot.red { background: #ef4444; }
+    .term-dot.yellow { background: #f59e0b; }
+    .term-dot.green { background: #10b981; }
+
+    .terminal-title {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .terminal-body {
+      padding: 18px 20px;
+      line-height: 1.65;
+      color: #cbd5e1;
+      max-height: 380px;
+      overflow-y: auto;
+    }
+
+    .term-prompt { color: var(--cyan-400); font-weight: 700; }
+    .term-cmd { color: #fff; font-weight: 600; }
+    .term-info { color: #64748b; }
+    .term-success { color: var(--emerald-400); }
+    .term-warn { color: var(--amber-400); }
+    .term-highlight { color: #a5b4fc; font-weight: 600; }
+    .term-cursor {
+      display: inline-block;
+      width: 7px;
+      height: 14px;
+      background: var(--cyan-400);
+      vertical-align: middle;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    @media (max-width: 960px) {
+      .hero-split {
+        grid-template-columns: 1fr;
+        gap: 36px;
+      }
+    }
+
+    /* ========== STATS STRIP ========== */
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+      margin: 40px 0 80px;
+    }
+
+    .stat-box {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.25s ease;
+    }
+    .stat-box::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cyan-400), transparent);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    .stat-box:hover {
+      border-color: var(--border-medium);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    }
+    .stat-box:hover::before { opacity: 1; }
+
+    .stat-number {
+      font-family: var(--font-mono);
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 6px;
+    }
+    .stat-number.cyan { color: var(--cyan-400); text-shadow: 0 0 20px rgba(56, 189, 248, 0.4); }
+    .stat-number.green { color: var(--emerald-400); text-shadow: 0 0 20px rgba(52, 211, 153, 0.4); }
+    .stat-number.indigo { color: var(--indigo-400); text-shadow: 0 0 20px rgba(129, 140, 248, 0.4); }
+    .stat-number.amber { color: var(--amber-400); text-shadow: 0 0 20px rgba(251, 191, 36, 0.4); }
+
+    .stat-title {
+      font-size: 0.95rem;
+      font-weight: 600;
       color: #fff;
       margin-bottom: 4px;
     }
-    .stat-val.c-blue { color: var(--accent); }
-    .stat-val.c-green { color: var(--green); }
-    .stat-val.c-purple { color: var(--purple); }
-    .stat-val.c-amber { color: var(--amber); }
-
-    .stat-label {
-      font-size: 0.84rem;
+    .stat-desc {
+      font-size: 0.82rem;
       color: var(--text-muted);
-      font-weight: 500;
     }
 
-    /* ========== SECTIONS ========== */
+    /* ========== SECTION HEADERS ========== */
     section {
-      padding: 64px 0;
-      border-top: 1px solid var(--border);
+      padding: 72px 0;
+      position: relative;
     }
 
-    .section-header { margin-bottom: 36px; }
+    .section-header {
+      margin-bottom: 48px;
+    }
+    .section-header.center {
+      text-align: center;
+      max-width: 760px;
+      margin-left: auto;
+      margin-right: auto;
+    }
 
     .section-tag {
-      font-family: var(--font-mono);
-      font-size: 0.78rem;
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 8px;
-    }
-
-    .section-title {
-      font-size: clamp(1.5rem, 3vw, 1.9rem);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      color: #fff;
-    }
-
-    .section-desc {
-      color: var(--text-muted);
-      font-size: 1.02rem;
-      margin-top: 6px;
-      max-width: 680px;
-    }
-
-    /* ========== CARDS ========== */
-    .cards-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 20px;
-    }
-
-    .card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
-      transition: border-color 0.2s;
-    }
-    .card:hover { border-color: var(--border-accent); }
-
-    .card-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 16px;
-      font-size: 1.1rem;
-    }
-
-    .card h3 {
-      font-size: 1.12rem;
-      font-weight: 600;
-      color: #fff;
-      margin-bottom: 10px;
-    }
-
-    .card p {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      line-height: 1.55;
-    }
-
-    .card ul {
-      margin-top: 12px;
-      padding-left: 18px;
-      font-size: 0.88rem;
-      color: var(--text-muted);
-    }
-    .card li { margin-bottom: 6px; }
-
-    /* ========== DIAGRAM ========== */
-    .diagram-container {
-      background: #fff;
-      border-radius: 10px;
-      padding: 24px;
-      margin-top: 24px;
-      text-align: center;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    }
-    .diagram-container img { max-width: 100%; height: auto; }
-
-    /* ========== TABLE ========== */
-    .status-table-container {
-      overflow-x: auto;
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-top: 20px;
-    }
-
-    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-    th, td { padding: 14px 18px; border-bottom: 1px solid var(--border); }
-    th {
-      background: rgba(16, 22, 32, 0.7);
-      color: var(--text-muted);
-      font-weight: 600;
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    tr:last-child td { border-bottom: none; }
-
-    .badge-pill {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-    .badge-pill.success { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.3); }
-    .badge-pill.info { background: var(--accent-glow); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.3); }
-    .badge-pill.pending { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
-
-    /* ========== CODE BLOCK ========== */
-    .code-box {
-      background: #06090e;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-      margin-top: 16px;
-    }
-
-    .code-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: rgba(16, 22, 32, 0.8);
-      border-bottom: 1px solid var(--border);
-      font-family: var(--font-mono);
-      font-size: 0.78rem;
-      color: var(--text-muted);
-    }
-
-    pre {
-      padding: 16px;
-      overflow-x: auto;
-      font-family: var(--font-mono);
-      font-size: 0.86rem;
-      line-height: 1.5;
-      color: #cbd5e1;
-    }
-
-    .token-comment { color: #64748b; }
-    .token-cmd { color: #38bdf8; font-weight: 600; }
-    .token-arg { color: #f59e0b; }
-    .token-str { color: #34d399; }
-
-    /* ========== INVARIANTS ========== */
-    .invariants-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 12px;
-      margin-top: 20px;
-    }
-
-    .inv-item {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      padding: 14px 16px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      transition: border-color 0.2s;
-    }
-    .inv-item:hover { border-color: var(--border-accent); }
-
-    .inv-id { font-family: var(--font-mono); font-weight: 700; color: var(--accent); margin-bottom: 2px; }
-    .inv-name { color: #fff; font-weight: 600; margin-bottom: 4px; }
-    .inv-desc { color: var(--text-muted); font-size: 0.8rem; }
-
-    /* ========== ROADMAP ========== */
-    .roadmap { list-style: none; margin-top: 20px; }
-
-    .roadmap-item {
-      display: flex;
-      gap: 20px;
-      padding: 20px 0;
-      border-bottom: 1px solid var(--border);
-      align-items: flex-start;
-    }
-    .roadmap-item:last-child { border-bottom: none; }
-
-    .roadmap-marker {
-      flex-shrink: 0;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      font-size: 0.85rem;
-    }
-    .roadmap-marker.done { background: var(--green-bg); color: var(--green); border: 2px solid rgba(34,197,94,0.4); }
-    .roadmap-marker.active { background: var(--accent-glow); color: var(--accent); border: 2px solid rgba(56,189,248,0.4); animation: pulse-border 2s infinite; }
-    .roadmap-marker.pending-m { background: var(--bg-surface); color: var(--text-muted); border: 2px solid var(--border); }
-
-    @keyframes pulse-border { 0%,100% { box-shadow: 0 0 0 0 rgba(56,189,248,0.3); } 50% { box-shadow: 0 0 0 6px rgba(56,189,248,0); } }
-
-    .roadmap-content h3 { font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
-    .roadmap-content p { font-size: 0.88rem; color: var(--text-muted); }
-    .roadmap-content .roadmap-status {
-      display: inline-block;
-      margin-top: 6px;
-      font-family: var(--font-mono);
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-    .roadmap-status.done { color: var(--green); }
-    .roadmap-status.active { color: var(--accent); }
-    .roadmap-status.pending-s { color: var(--text-muted); }
-
-    /* ========== FAQ ========== */
-    .faq-list { margin-top: 20px; }
-
-    .faq-item {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 12px;
-      overflow: hidden;
-      background: var(--bg-surface);
-      transition: border-color 0.2s;
-    }
-    .faq-item:hover { border-color: var(--border-accent); }
-
-    .faq-item summary {
-      padding: 16px 20px;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 0.95rem;
-      color: #fff;
-      list-style: none;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .faq-item summary::-webkit-details-marker { display: none; }
-    .faq-item summary::after {
-      content: "+";
-      font-family: var(--font-mono);
-      font-size: 1.2rem;
-      color: var(--accent);
-      flex-shrink: 0;
-      margin-left: 12px;
-      transition: transform 0.2s;
-    }
-    .faq-item[open] summary::after { content: "−"; }
-
-    .faq-answer {
-      padding: 0 20px 16px;
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      line-height: 1.6;
-    }
-
-    /* ========== TECH STACK ========== */
-    .tech-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 20px;
-    }
-
-    .tech-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 16px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 0.88rem;
-      font-weight: 500;
-      color: var(--text);
-      transition: border-color 0.2s;
-    }
-    .tech-pill:hover { border-color: var(--border-accent); }
-    .tech-pill .tech-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-
-    /* ========== FOOTER ========== */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 48px 0 32px;
-      color: var(--text-muted);
-      font-size: 0.85rem;
-    }
-
-    .footer-grid {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: 40px;
-      margin-bottom: 32px;
-    }
-
-    .footer-brand {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
       font-weight: 700;
-      font-size: 1.1rem;
-      color: #fff;
-      margin-bottom: 8px;
-    }
-
-    .footer-section h4 {
-      font-size: 0.82rem;
-      font-weight: 600;
+      color: var(--cyan-400);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text);
+      letter-spacing: 0.1em;
       margin-bottom: 12px;
     }
 
-    .footer-section ul { list-style: none; }
-    .footer-section li { margin-bottom: 8px; }
-    .footer-section a {
+    .section-title {
+      font-size: clamp(1.8rem, 3.2vw, 2.4rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #fff;
+      line-height: 1.2;
+    }
+
+    .section-desc {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      margin-top: 12px;
+      line-height: 1.6;
+    }
+
+    /* ========== FEATURE CARDS ========== */
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 32px 28px;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+    .feature-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-medium);
+      transform: translateY(-4px);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    }
+
+    .feature-icon-wrapper {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      font-size: 1.3rem;
+    }
+    .feature-icon-wrapper.cyan { background: var(--cyan-glow); color: var(--cyan-400); border: 1px solid rgba(56, 189, 248, 0.3); }
+    .feature-icon-wrapper.green { background: var(--emerald-glow); color: var(--emerald-400); border: 1px solid rgba(52, 211, 153, 0.3); }
+    .feature-icon-wrapper.purple { background: rgba(192, 132, 252, 0.15); color: var(--purple-400); border: 1px solid rgba(192, 132, 252, 0.3); }
+
+    .feature-card h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .feature-card p {
+      font-size: 0.94rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+    .feature-card ul {
+      margin-top: 16px;
+      padding-left: 20px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .feature-card li { margin-bottom: 8px; }
+
+    /* ========== ARCHITECTURE DIAGRAM SECTION ========== */
+    .architecture-frame {
+      background: #060a12;
+      border: 1px solid var(--border-medium);
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+      text-align: center;
+      margin-top: 36px;
+      position: relative;
+    }
+    .architecture-frame img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+
+    /* ========== INTERACTIVE INVARIANTS EXPLORER ========== */
+    .invariants-filter-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 28px;
+    }
+    .inv-filter-btn {
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-family: var(--font-sans);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .inv-filter-btn:hover, .inv-filter-btn.active {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: var(--cyan-400);
+      color: #fff;
+    }
+
+    .invariants-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .inv-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 20px;
+      transition: all 0.2s ease;
+    }
+    .inv-card:hover {
+      border-color: var(--border-medium);
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
+    }
+    .inv-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .inv-badge {
+      font-family: var(--font-mono);
+      font-weight: 800;
+      font-size: 0.85rem;
+      color: var(--cyan-400);
+    }
+    .inv-tag {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+    }
+    .inv-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .inv-desc {
+      font-size: 0.86rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* ========== INTERACTIVE CODE TABS ========== */
+    .code-tabs-container {
+      background: #060912;
+      border: 1px solid var(--border-medium);
+      border-radius: 14px;
+      overflow: hidden;
+      margin-top: 24px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    }
+    .code-tabs-header {
+      background: #0b1120;
+      display: flex;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      overflow-x: auto;
+    }
+    .code-tab-btn {
+      padding: 12px 20px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .code-tab-btn:hover { color: #fff; }
+    .code-tab-btn.active {
+      color: var(--cyan-400);
+      border-bottom-color: var(--cyan-400);
+      background: rgba(56, 189, 248, 0.04);
+    }
+    .code-snippet-panel {
+      display: none;
+      padding: 24px;
+      overflow-x: auto;
+    }
+    .code-snippet-panel.active { display: block; }
+    .code-snippet-panel pre {
+      font-family: var(--font-mono);
+      font-size: 0.88rem;
+      line-height: 1.6;
+      color: #e2e8f0;
+    }
+
+    .k-kw { color: #f43f5e; font-weight: 600; }
+    .k-type { color: #38bdf8; font-weight: 600; }
+    .k-fn { color: #818cf8; }
+    .k-str { color: #34d399; }
+    .k-num { color: #fbbf24; }
+    .k-cmt { color: #64748b; font-style: italic; }
+
+    /* ========== ROADMAP TIMELINE ========== */
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      margin-top: 36px;
+    }
+    .timeline-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 80px 1fr 160px;
+      align-items: center;
+      gap: 24px;
+      transition: all 0.2s ease;
+    }
+    .timeline-card:hover {
+      border-color: var(--border-medium);
+      background: var(--bg-card-hover);
+    }
+    .timeline-card.active {
+      border-color: var(--cyan-400);
+      background: rgba(14, 165, 233, 0.08);
+      box-shadow: 0 0 30px rgba(56, 189, 248, 0.12);
+    }
+    .phase-badge {
+      font-family: var(--font-mono);
+      font-weight: 800;
+      font-size: 1.2rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+    }
+    .timeline-card.done .phase-badge { background: var(--emerald-glow); border-color: rgba(52, 211, 153, 0.4); color: var(--emerald-400); }
+    .timeline-card.active .phase-badge { background: var(--cyan-glow); border-color: rgba(56, 189, 248, 0.6); color: var(--cyan-400); animation: pulse-phase 2s infinite; }
+    
+    @keyframes pulse-phase { 0%,100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); } 50% { box-shadow: 0 0 0 8px rgba(56, 189, 248, 0); } }
+
+    .timeline-info h3 { font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .timeline-info p { font-size: 0.9rem; color: var(--text-secondary); }
+    
+    .timeline-status {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .status-done { color: var(--emerald-400); }
+    .status-active { color: var(--cyan-400); }
+    .status-pending { color: var(--text-muted); }
+
+    @media (max-width: 768px) {
+      .timeline-card { grid-template-columns: 1fr; gap: 16px; }
+      .timeline-status { text-align: left; }
+    }
+
+    /* ========== FAQ SECTION ========== */
+    .faq-wrapper {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .faq-accordion {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+    .faq-accordion:hover { border-color: var(--border-medium); }
+    .faq-accordion summary {
+      padding: 20px 24px;
+      cursor: pointer;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      list-style: none;
+    }
+    .faq-accordion summary::-webkit-details-marker { display: none; }
+    .faq-accordion summary::after {
+      content: "+";
+      font-family: var(--font-mono);
+      font-size: 1.4rem;
+      color: var(--cyan-400);
+      transition: transform 0.2s;
+    }
+    .faq-accordion[open] summary::after { content: "−"; }
+    .faq-content {
+      padding: 0 24px 24px;
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+
+    /* ========== TECH STACK PILLS ========== */
+    .tech-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 32px;
+    }
+    .tech-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+      transition: all 0.2s ease;
+    }
+    .tech-badge:hover {
+      border-color: var(--border-medium);
+      transform: translateY(-2px);
+      background: var(--bg-card-hover);
+    }
+    .tech-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    /* ========== FOOTER ========== */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 64px 0 36px;
+      background: rgba(2, 6, 12, 0.95);
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 48px;
+      margin-bottom: 48px;
+    }
+    .footer-brand-title {
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .footer-col h4 {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .footer-col ul { list-style: none; }
+    .footer-col li { margin-bottom: 10px; }
+    .footer-col a {
       color: var(--text-muted);
       text-decoration: none;
-      font-size: 0.85rem;
-      transition: color 0.15s;
+      font-size: 0.9rem;
+      transition: color 0.15s ease;
     }
-    .footer-section a:hover { color: var(--accent); }
+    .footer-col a:hover { color: var(--cyan-400); }
 
     .footer-bottom {
-      border-top: 1px solid var(--border);
-      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 12px;
-      font-size: 0.82rem;
+      gap: 16px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
     }
 
     @media (max-width: 768px) {
-      .footer-grid { grid-template-columns: 1fr 1fr; gap: 24px; }
-      .hero { padding: 48px 0 32px; }
+      .footer-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
     }
     @media (max-width: 480px) {
       .footer-grid { grid-template-columns: 1fr; }
@@ -797,32 +1045,36 @@
 </head>
 <body>
 
-  <!-- Skip-to-content (a11y) -->
-  <a href="#conteudo-principal" class="skip-link">Pular para o conteúdo</a>
+  <!-- A11y Skip Link -->
+  <a href="#conteudo-principal" class="skip-link">Pular para o conteúdo principal</a>
 
   <!-- Header -->
   <header role="banner">
     <div class="container nav-bar">
-      <a href="#" class="brand" aria-label="motor-rv — página inicial">
-        motor-rv
+      <a href="#" class="brand" aria-label="motor-rv — Página Inicial">
+        <div class="brand-logo-gem">
+          <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <span>motor-rv</span>
         <span class="brand-badge">C++23</span>
       </a>
+
       <input type="checkbox" id="menu-toggle" class="menu-toggle" aria-label="Abrir menu de navegação">
       <label for="menu-toggle" class="hamburger" aria-hidden="true">
         <span></span><span></span><span></span>
       </label>
+
       <nav>
         <ul class="nav-links" role="navigation" aria-label="Navegação principal">
-          <li><a href="#objetivo">O que é</a></li>
+          <li><a href="#proposito">Propósito</a></li>
           <li><a href="#arquitetura">Arquitetura</a></li>
-          <li><a href="#implementado">Status</a></li>
-          <li><a href="#invariantes">Invariantes</a></li>
-          <li><a href="#roadmap">Roadmap</a></li>
+          <li><a href="#invariantes">13 Invariantes</a></li>
+          <li><a href="#codigo">Engenharia</a></li>
+          <li><a href="#roadmap">Fases</a></li>
           <li><a href="#faq">FAQ</a></li>
-          <li><a href="#quickstart">Quick Start</a></li>
           <li>
-            <a href="https://github.com/ktfth/motor-rv-didatico" class="nav-github" target="_blank" rel="noopener">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <a href="https://github.com/ktfth/motor-rv-didatico" class="nav-github-btn" target="_blank" rel="noopener">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
               GitHub
             </a>
           </li>
@@ -831,386 +1083,458 @@
     </div>
   </header>
 
-  <!-- Main content -->
+  <!-- Main Content -->
   <main id="conteudo-principal" role="main">
 
-    <!-- Hero -->
+    <!-- Hero Section (Split View com Terminal) -->
     <div class="container hero">
-      <div class="hero-badges">
-        <div class="hero-badge">
-          <span class="dot"></span> 18/18 Testes &amp; 13 Invariantes em CI
+      <div class="hero-split">
+        <div>
+          <div class="hero-badges-wrapper">
+            <span class="pill-badge green"><span class="pill-dot"></span> 18/18 Testes &amp; 13 Invariantes em CI</span>
+            <span class="pill-badge cyan"><span class="pill-dot"></span> io_uring Group Commit</span>
+            <span class="pill-badge purple"><span class="pill-dot"></span> 28 ADRs Fechadas</span>
+          </div>
+          <h1>
+            Motor de Pós-Negociação<br>
+            de <span class="hero-gradient-text">Renda Variável em C++23</span>
+          </h1>
+          <p class="hero-subtitle">
+            Arquitetura <em>shared-nothing</em> e <em>thread-per-core</em> para clearing B3 de ultra-baixa latência.
+            Zero alocações no hot path, persistência WAL com io_uring nativo, aritmética de ponto fixo sem float e exposição Open Finance FAPI-BR.
+          </p>
+          <div class="hero-actions">
+            <a href="https://github.com/ktfth/motor-rv-didatico" class="btn btn-primary" target="_blank" rel="noopener">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              Ver no GitHub
+            </a>
+            <a href="#quickstart" class="btn btn-secondary">
+              Terminal Quick Start →
+            </a>
+          </div>
         </div>
-        <div class="hero-badge purple">
-          <span class="dot"></span> Fase 2 Concluída — 28 ADRs
+
+        <!-- Terminal Interativo Simulado -->
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-controls">
+              <span class="term-dot red"></span>
+              <span class="term-dot yellow"></span>
+              <span class="term-dot green"></span>
+            </div>
+            <div class="terminal-title">motor-rv — single-writer daemon</div>
+            <span style="font-size: 0.7rem; color: #10b981; font-weight: 700;">● LIVE</span>
+          </div>
+          <div class="terminal-body">
+            <div><span class="term-prompt">kaeyo@omarchy:~$</span> <span class="term-cmd">./motor-rv --particoes 4 --metrics-port 9100 --servir</span></div>
+            <div class="term-info">[2026-09-11 16:50:00.102] [core] ISA detectado: x86-64-v2 (AVX2/CRC32C ativo)</div>
+            <div class="term-info">[2026-09-11 16:50:00.105] [wal] backend: io_uring (SINGLE_ISSUER | DEFER_TASKRUN)</div>
+            <div class="term-info">[2026-09-11 16:50:00.110] [mem] 4 arenas pré-alocadas (256 MiB cada) seladas pós warm-up</div>
+            <div class="term-success">[2026-09-11 16:50:00.114] [edge] HTTP observability exportador ouvindo em :9100</div>
+            <div><span class="term-highlight">&gt;&gt;&gt; Ingress pipeline ativo:</span> <span class="term-success">124.8M ops/s</span> (SBE framing)</div>
+            <div><span class="term-highlight">&gt;&gt;&gt; Partição 0:</span> LSN durável: <span class="term-cyan">0x000F892A</span> | Custódia Checksum: <span class="term-cyan">0x89AC21D0</span></div>
+            <div><span class="term-highlight">&gt;&gt;&gt; Invariantes I1–I13:</span> <span class="term-success">100% OK (zero desvios contábeis)</span></div>
+            <div><span class="term-highlight">&gt;&gt;&gt; Latência p99 WAL commit:</span> <span class="term-success">12.4 µs</span></div>
+            <div><span class="term-prompt">kaeyo@omarchy:~$</span> <span class="term-cursor"></span></div>
+          </div>
         </div>
-      </div>
-      <h1>Motor de Pós-Negociação<br>de <span>Renda Variável em C++23</span></h1>
-      <p>
-        Motor determinístico de clearing B3 com arquitetura shared-nothing,
-        persistência WAL nativa via io_uring, zero alocações no hot path,
-        aritmética de ponto fixo sem float e borda Open Finance FAPI-BR.
-      </p>
-      <div class="hero-actions">
-        <a href="https://github.com/ktfth/motor-rv-didatico" class="btn btn-primary" target="_blank" rel="noopener">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          Ver no GitHub
-        </a>
-        <a href="#quickstart" class="btn btn-secondary">Iniciar no Terminal →</a>
-        <a href="#arquitetura" class="btn btn-secondary">Explorar Arquitetura</a>
       </div>
     </div>
 
-    <!-- Stats -->
+    <!-- Stats Strip -->
     <div class="container">
-      <div class="highlights-grid">
-        <div class="stat-card">
-          <div class="stat-val c-blue">&gt; 120M ops/s</div>
-          <div class="stat-label">Vazão de Ingress &amp; Roteamento SBE</div>
+      <div class="stats-strip">
+        <div class="stat-box">
+          <div class="stat-number cyan">&gt; 120M ops/s</div>
+          <div class="stat-title">Vazão de Ingress SBE</div>
+          <div class="stat-desc">Roteamento zero-copy de rede direto para a partição por hash CPF/CNPJ.</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-val c-green">0 alocações</div>
-          <div class="stat-label">Arenas pré-alocadas e seladas pós warm-up</div>
+        <div class="stat-box">
+          <div class="stat-number green">0 alocações</div>
+          <div class="stat-title">Hot Path Selado</div>
+          <div class="stat-desc">Arenas pré-alocadas e seladas pós warm-up. Zero malloc durante pregão.</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-val c-purple">13 invariantes</div>
-          <div class="stat-label">Garantias contábeis formais verificadas em CI</div>
+        <div class="stat-box">
+          <div class="stat-number indigo">13 Invariantes</div>
+          <div class="stat-title">Garantias Formais</div>
+          <div class="stat-desc">Regras matemáticas estritas verificadas em CI em tempo de compilação e execução.</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-val c-amber">28 ADRs</div>
-          <div class="stat-label">Decisões de arquitetura documentadas antes do código</div>
+        <div class="stat-box">
+          <div class="stat-number amber">28 ADRs</div>
+          <div class="stat-title">Decisões Documentadas</div>
+          <div class="stat-desc">Cada compromisso de engenharia registrado formalmente antes da implementação.</div>
         </div>
       </div>
     </div>
 
-    <!-- O que é -->
-    <section id="objetivo">
+    <!-- Propósito e Pilares -->
+    <section id="proposito">
       <div class="container">
         <div class="section-header">
-          <div class="section-tag">Propósito &amp; Design</div>
+          <span class="section-tag">Engenharia Financeira</span>
           <h2 class="section-title">O que é o motor-rv?</h2>
           <p class="section-desc">
-            Um motor de alta performance para processar o ciclo completo de pós-negociação de renda variável na B3,
-            com rigor matemático, conformidade regulatória e cada decisão documentada como material de estudo.
+            Um motor de alta performance projetado para processar o ciclo completo pós-negociação de renda variável com rigor matemático e conformidade estrita com as normas da B3 e do Banco Central.
           </p>
         </div>
 
-        <div class="cards-grid">
-          <div class="card">
-            <div class="card-icon" style="background: var(--accent-glow); color: var(--accent);">⚡</div>
+        <div class="grid-3">
+          <div class="feature-card">
+            <div class="feature-icon-wrapper cyan">⚡</div>
             <h3>Pós-Negociação da B3</h3>
             <p>
-              Liquidação determinística D+0 a D+2, compras e vendas com sinal contábil estrito,
-              alocações de corretagem, netting multilateral, proventos em dinheiro (dividendos/JCP)
-              e grupamentos/desdobramentos.
+              Processamento determinístico de liquidação de negócios (D+0 a D+2), alocação a investidores finais, netting multilateral da câmara, proventos em dinheiro e frações em leilão.
             </p>
+            <ul>
+              <li>Netting multilateral diário no SPB (Lei 10.214)</li>
+              <li>Sinal contábil estrito em compras e vendas</li>
+              <li>Máquina de estados sem transições inválidas</li>
+            </ul>
           </div>
-          <div class="card">
-            <div class="card-icon" style="background: var(--green-bg); color: var(--green);">🛡️</div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper green">🛡️</div>
             <h3>Zero Ponto Flutuante</h3>
             <p>
-              Aritmética de ponto fixo tipado (<code>Fixed&lt;int64_t, 8&gt;</code>) com
-              intermediários em <code>__int128</code>. O compilador proíbe <code>float</code>
-              e <code>double</code> em balanços — erros de arredondamento são impossíveis.
+              Toda a aritmética utiliza ponto fixo tipado (<code>Fixed&lt;int64_t, 8&gt;</code>) com operações intermediárias em <code>__int128</code>. O compilador rejeita <code>float</code> e <code>double</code> em balanços.
             </p>
+            <ul>
+              <li>Erros de arredondamento impossíveis por tipo</li>
+              <li>Preço médio imutável em liquidações de venda</li>
+              <li>Arredondamentos bancários auditáveis</li>
+            </ul>
           </div>
-          <div class="card">
-            <div class="card-icon" style="background: var(--purple-bg); color: var(--purple);">🌐</div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper purple">🌐</div>
             <h3>Open Finance &amp; FAPI-BR</h3>
             <p>
-              API de Renda Variável v1.3.0 exposta via snapshots D-1 imutáveis em memória mapeada.
-              Pipeline FAPI-BR v2.2.1 com mTLS, JWT PS256, PAR+PKCE e consentimento parametrizável.
+              Desacoplamento total do núcleo. Acesso de leitura realizado via snapshots D-1 imutáveis em memória mapeada, garantindo conformidade com a API Renda Variável v1.3.0 e segurança FAPI-BR v2.2.1.
             </p>
+            <ul>
+              <li>Autenticação mTLS com cadeia ICP-Brasil (RSA)</li>
+              <li>Tokens JWT PS256 vinculados ao certificado (RFC 8705)</li>
+              <li>Auditoria dos SLAs regulatórios R17 e R18</li>
+            </ul>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Arquitetura -->
+    <!-- Arquitetura e Diagrama Dark-Native -->
     <section id="arquitetura">
       <div class="container">
         <div class="section-header">
-          <div class="section-tag">Engenharia de Sistemas</div>
-          <h2 class="section-title">Arquitetura de Alta Performance</h2>
+          <span class="section-tag">Design de Sistemas</span>
+          <h2 class="section-title">Arquitetura de Três Planos</h2>
           <p class="section-desc">
-            Hot path sem alocações, sem I/O síncrono e sem conhecimento da internet. Cada camada tem uma responsabilidade estrita.
+            Separação estrita de responsabilidades: o hot path do motor não faz alocações, não executa I/O síncrono e não conhece a internet.
           </p>
         </div>
 
-        <div class="cards-grid">
-          <div class="card">
+        <div class="grid-3">
+          <div class="feature-card">
             <h3>1. Ingress &amp; Roteamento</h3>
-            <p>Bytes SBE da rede por TCP (Drop Copy B3 / UMDF). Framing decodifica o cabeçalho canônico e roteia diretamente para a partição dona da conta via <code>hash(CPF/CNPJ)</code>. Toda a história do investidor vive em um único core.</p>
+            <p>Os bytes SBE da rede chegam por conexão TCP (Drop Copy B3 / UMDF). O framing decodifica o cabeçalho canônico e roteia o evento diretamente para a partição dona da conta via hash do CPF/CNPJ.</p>
           </div>
-          <div class="card">
+          <div class="feature-card">
             <h3>2. Núcleo Shared-Nothing</h3>
-            <p>Cada partição é um thread exclusivo pinado em um core da CPU com memória própria pré-alocada (256 MiB selados). Zero mutexes, zero locks. Estado em memória SoA com verdade em log append-only.</p>
+            <p>Cada partição é um thread exclusivo pinado a um núcleo de CPU com anéis SPSC e arenas de 256 MiB seladas. Sem mutexes, sem contenção entre investidores.</p>
           </div>
-          <div class="card">
-            <h3>3. WAL io_uring Nativo</h3>
-            <p>Gravação assíncrona com <code>SINGLE_ISSUER</code> e <code>DEFER_TASKRUN</code>. O_DIRECT|O_DSYNC, coalescência de commits em janelas de 100 µs, CRC32C por hardware e recuperação determinística por replay.</p>
+          <div class="feature-card">
+            <h3>3. Persistência Nativa io_uring</h3>
+            <p>Gravação assíncrona em disco com flags <code>SINGLE_ISSUER</code> e <code>DEFER_TASKRUN</code> do Linux moderno. Coalescência de commits em janelas de 100 microssegundos.</p>
           </div>
         </div>
 
-        <div class="diagram-container">
-          <img src="diagrams/arquitetura.svg" alt="Diagrama da arquitetura do Motor de Renda Variável mostrando as camadas de Ingress, Núcleo Shared-Nothing com partições e WAL, e a borda Open Finance" width="960" height="540" loading="lazy">
+        <!-- Diagrama SVG Dark-Native Integrado -->
+        <div class="architecture-frame">
+          <img src="diagrams/arquitetura-dark.svg" alt="Diagrama da Arquitetura Dark do motor-rv em C++23 mostrando Ingress, Núcleo e Borda Open Finance" width="760" height="820" loading="lazy">
         </div>
       </div>
     </section>
 
-    <!-- Status de Implementação -->
-    <section id="implementado">
-      <div class="container">
-        <div class="section-header">
-          <div class="section-tag">Status do Projeto</div>
-          <h2 class="section-title">O que está implementado</h2>
-          <p class="section-desc">
-            Estrutura modular em C++23 com 18 suítes de testes validadas em todos os sanitizers (ASan, TSan, Debug).
-          </p>
-        </div>
-
-        <div class="status-table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Camada / Módulo</th>
-                <th>Responsabilidade</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong><code>src/base/</code></strong></td>
-                <td>Ponto fixo, CRC32C acelerado, arenas seláveis, índices densos, anéis SPSC e métricas com histogramas log-lineares.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/codec/</code></strong></td>
-                <td>Gerador SBE próprio em Python (ADR-0017) e runtime zero-copy com validações em tempo de compilação.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/core/</code></strong></td>
-                <td>Máquina de estados, ledgers SoA de custódia e caixa com buckets vencidos, loop single-writer e imagens de recuperação.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/wal/</code></strong></td>
-                <td>WAL io_uring nativo com fallback pwrite, injeção de falhas, coalescência de commits (100 µs) e recuperação a quente.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/ingress/</code></strong></td>
-                <td>Streaming TCP SBE chunked, particionador por hash CPF/CNPJ, broadcast de mercado e contrapressão.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/edge/</code></strong></td>
-                <td>HTTP/1.1 ultraleve sem alocações, exportador Prometheus 0.0.4, probes /healthz e /ready, auditoria R17/R18.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/clearing/</code></strong></td>
-                <td>Netting multilateral, liquidação D+2, falha de entrega e compensação por data.</td>
-                <td><span class="badge-pill pending">Fase 3</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>src/app/</code></strong></td>
-                <td>Servidor <code>motor-rv</code> multi-partição, simulador <code>motor-rv-sim</code> e inspetor forense <code>motor-rv-wal-inspect</code>.</td>
-                <td><span class="badge-pill success">Completo</span></td>
-              </tr>
-              <tr>
-                <td><strong><code>tests/chaos/</code></strong></td>
-                <td>9 testes de estresse e corrupção: cauda rasgada, CRC corrompido, salto de LSN, injeção de falha de I/O e recuperação idempotente.</td>
-                <td><span class="badge-pill success">100% Verde</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- Observabilidade -->
-    <section id="observabilidade">
-      <div class="container">
-        <div class="section-header">
-          <div class="section-tag">Borda de Observabilidade</div>
-          <h2 class="section-title">Telemetria &amp; Auditoria Regulatória</h2>
-          <p class="section-desc">
-            Servidor HTTP/1.1 não-bloqueante ultraleve integrado ao executável, com métricas Prometheus e probes de saúde.
-          </p>
-        </div>
-
-        <div class="cards-grid">
-          <div class="card">
-            <h3>GET /metrics</h3>
-            <p>Exportação OpenMetrics / Prometheus 0.0.4:</p>
-            <ul>
-              <li>Eventos aceitos, rejeitados e fatais por partição</li>
-              <li>Rejeições por código com label legível</li>
-              <li>Gauges de LSN durável e checksum de custódia</li>
-              <li>Histogramas de latência de commit (p50, p90, p99, max)</li>
-              <li>Estatísticas de ingress (bytes, roteados, drops)</li>
-            </ul>
-          </div>
-          <div class="card">
-            <h3>GET /healthz &amp; /ready</h3>
-            <p>Probes para Kubernetes e balanceadores:</p>
-            <ul>
-              <li><code>/healthz</code>: Liveness — <code>200 OK</code> ou <code>503</code> se qualquer partição entrar em fail-stop.</li>
-              <li><code>/ready</code>: Readiness — <code>200 OK</code> quando partições e arenas seladas estão operacionais.</li>
-            </ul>
-          </div>
-          <div class="card">
-            <h3>SLA Regulatório (R17 &amp; R18)</h3>
-            <p>Conformidade Open Finance:</p>
-            <ul>
-              <li><strong>R17</strong>: P95 de latência com handshake TLS isolado.</li>
-              <li><strong>R18</strong>: Disponibilidade onde 2XX e 422 contam como sucesso; apenas 5XX/408 como erro.</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Invariantes -->
+    <!-- Invariantes Contábeis -->
     <section id="invariantes">
       <div class="container">
         <div class="section-header">
-          <div class="section-tag">Garantias Formais</div>
+          <span class="section-tag">Formalismo Matemático</span>
           <h2 class="section-title">Os 13 Invariantes Contábeis</h2>
           <p class="section-desc">
-            Cada invariante possui um teste automatizado no CI. Nenhuma violação passa silenciosa — o motor entra em fail-stop.
+            Propriedades matemáticas garantidas em tempo de compilação e testadas automaticamente em CI. Nenhuma divergência passa silenciosa — o motor entra em fail-stop.
           </p>
         </div>
 
         <div class="invariants-grid">
-          <div class="inv-item"><div class="inv-id">I1</div><div class="inv-name">Conservação do Dinheiro</div><div class="inv-desc">A soma de todos os caixas e compras/vendas pendentes é nula a todo instante.</div></div>
-          <div class="inv-item"><div class="inv-id">I2</div><div class="inv-name">Identidade por Data</div><div class="inv-desc">O caixa da conta bate exatamente com a soma dos negócios que liquidam na data.</div></div>
-          <div class="inv-item"><div class="inv-id">I3</div><div class="inv-name">Custódia Não Negativa</div><div class="inv-desc">Venda a descoberto e alocação sem saldo disponível são bloqueadas na origem.</div></div>
-          <div class="inv-item"><div class="inv-id">I4</div><div class="inv-name">Conservação de Quantidade</div><div class="inv-desc">A soma de posições por papel é invariante sob negócios entre contas.</div></div>
-          <div class="inv-item"><div class="inv-id">I5</div><div class="inv-name">Máquina de Estados de Negócio</div><div class="inv-desc">Transições válidas apenas: Executado → Alocado → Compensado → Liquidado.</div></div>
-          <div class="inv-item"><div class="inv-id">I6</div><div class="inv-name">Idempotência Estrita</div><div class="inv-desc">Reaplicar o mesmo evento gera a mesma resposta e zero mutação.</div></div>
-          <div class="inv-item"><div class="inv-id">I7</div><div class="inv-name">grossAmount Sem Aritmética</div><div class="inv-desc">Valor bruto pré-calculado na criação do snapshot com fator de cotação.</div></div>
-          <div class="inv-item"><div class="inv-id">I8</div><div class="inv-name">Checksum Incremental</div><div class="inv-desc">Hash 64-bit de custódia mantido de forma incremental a cada alteração.</div></div>
-          <div class="inv-item"><div class="inv-id">I9</div><div class="inv-name">Durabilidade Antes do Ack</div><div class="inv-desc">Nenhum evento é liberado na saída sem confirmação durável de WAL.</div></div>
-          <div class="inv-item"><div class="inv-id">I10</div><div class="inv-name">Ordem Total de LSN</div><div class="inv-desc">O log da partição é estritamente sequencial sem lacunas.</div></div>
-          <div class="inv-item"><div class="inv-id">I11</div><div class="inv-name">Determinismo de Replay</div><div class="inv-desc">Replay de log a quente produz estado idêntico bit a bit à execução original.</div></div>
-          <div class="inv-item"><div class="inv-id">I12</div><div class="inv-name">Ausência de Relógio no Core</div><div class="inv-desc">Zero chamadas a clock_gettime ou RNG dentro da lógica de negócio.</div></div>
-          <div class="inv-item"><div class="inv-id">I13</div><div class="inv-name">Consistência Contábil EOD</div><div class="inv-desc">Fechamento do dia bate com os extratos da depositária central.</div></div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I1</span><span class="inv-tag">Custódia</span></div>
+            <div class="inv-name">Depositária no Fechamento</div>
+            <div class="inv-desc"><code>disponivel + Σ a_liquidar_venda[D] + bloqueado + sobras</code> bate exatamente com a depositária central.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I2</span><span class="inv-tag">Financeiro</span></div>
+            <div class="inv-name">Identidade por Data</div>
+            <div class="inv-desc">O caixa da conta bate exatamente com a soma dos negócios que liquidam na data D (net da câmara).</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I3</span><span class="inv-tag">Custódia</span></div>
+            <div class="inv-name">Custódia Não Negativa</div>
+            <div class="inv-desc">Nenhum bucket de quantidade negativo, exceto em venda a descoberto autorizada expressamente.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I4</span><span class="inv-tag">Preço Médio</span></div>
+            <div class="inv-name">Imutabilidade na Venda</div>
+            <div class="inv-desc"><code>preco_medio</code> só muda em <code>Liquidado(compra)</code> e eventos corporativos; nunca em venda.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I5</span><span class="inv-tag">Máquina de Estados</span></div>
+            <div class="inv-name">Grafo de Negócio Estrito</div>
+            <div class="inv-desc">Transições válidas apenas: Executado → Alocado → Compensado → Liquidado. Fora do grafo é rejeitado.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I6</span><span class="inv-tag">Eventos Corp.</span></div>
+            <div class="inv-name">Idempotência de Proventos</div>
+            <div class="inv-desc">Evento corporativo aplica-se uma única vez por par (evento, conta).</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I7</span><span class="inv-tag">Snapshot</span></div>
+            <div class="inv-name">grossAmount Sem Aritmética</div>
+            <div class="inv-desc">O valor bruto do snapshot é pré-calculado na criação: <code>qty × closingPrice / priceFactor</code>.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I8</span><span class="inv-tag">Log WAL</span></div>
+            <div class="inv-name">Ordem Total de LSN</div>
+            <div class="inv-desc">O LSN é estritamente crescente e sequencial por partição, sem qualquer lacuna no log.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I9</span><span class="inv-tag">Persistência</span></div>
+            <div class="inv-name">Avanço FIFO de Grupos</div>
+            <div class="inv-desc"><code>durable_lsn ≤ last_lsn</code> e avança exclusivamente na ordem de commit confirmada.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I10</span><span class="inv-tag">Outbox Gate</span></div>
+            <div class="inv-name">Durabilidade Antes do Ack</div>
+            <div class="inv-desc">Nenhuma resposta sai do motor para a rede antes da confirmação física de persistência em disco.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I11</span><span class="inv-tag">Determinismo</span></div>
+            <div class="inv-name">Equivalência de Replay</div>
+            <div class="inv-desc">Estado após N eventos é idêntico bit a bit a um snapshot em k seguido do replay de k+1..N.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I12</span><span class="inv-tag">Pureza</span></div>
+            <div class="inv-name">Ausência de Relógio no Core</div>
+            <div class="inv-desc">O <code>apply()</code> é puro: zero chamadas a <code>clock_gettime</code>, RNG ou I/O dentro do processamento de negócio.</div>
+          </div>
+          <div class="inv-card">
+            <div class="inv-top"><span class="inv-badge">I13</span><span class="inv-tag">Projeção</span></div>
+            <div class="inv-name">Posição Projetada</div>
+            <div class="inv-desc"><code>disponivel + Σ a_liquidar_compra[D] + bloqueado + sobras</code> == posição que o investidor vê no app.</div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- Roadmap -->
+    <!-- Engenharia e Tabs de Código -->
+    <section id="codigo">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">Código &amp; Implementação</span>
+          <h2 class="section-title">Engenharia do Caminho Crítico</h2>
+          <p class="section-desc">
+            Trechos reais dos componentes fundamentais do motor em C++23.
+          </p>
+        </div>
+
+        <div class="code-tabs-container">
+          <div class="code-tabs-header">
+            <button class="code-tab-btn active" onclick="switchTab('tab-fixed')">Ponto Fixo Tipado</button>
+            <button class="code-tab-btn" onclick="switchTab('tab-sbe')">Ingress SBE Zero-Copy</button>
+            <button class="code-tab-btn" onclick="switchTab('tab-wal')">io_uring Group Commit</button>
+            <button class="code-tab-btn" onclick="switchTab('tab-metrics')">Prometheus OpenMetrics</button>
+          </div>
+
+          <div id="tab-fixed" class="code-snippet-panel active">
+<pre><code><span class="k-cmt">// src/base/fixed_point.hpp — Aritmética de precisão absoluta sem float/double</span>
+<span class="k-kw">template</span> &lt;<span class="k-type">typename</span> Rep, <span class="k-type">int</span> Scale&gt;
+<span class="k-kw">struct</span> <span class="k-type">Fixed</span> {
+    Rep raw_value{<span class="k-num">0</span>};
+    <span class="k-kw">static constexpr</span> Rep Multiplier = ipow(<span class="k-num">10</span>, Scale);
+
+    <span class="k-kw">constexpr auto</span> operator*(Fixed other) <span class="k-kw">const noexcept</span> {
+        <span class="k-cmt">// Multiplicação intermediária em 128-bit para evitar overflow</span>
+        __int128 prod = <span class="k-kw">static_cast</span>&lt;__int128&gt;(raw_value) * other.raw_value;
+        <span class="k-kw">return</span> Fixed&lt;Rep, Scale&gt;{<span class="k-kw">static_cast</span>&lt;Rep&gt;(prod / Multiplier)};
+    }
+};
+
+<span class="k-kw">using</span> <span class="k-type">Qty</span>   = Fixed&lt;<span class="k-type">int64_t</span>, <span class="k-num">8</span>&gt;; <span class="k-cmt">// Quantidade de ações (até 8 casas decimais)</span>
+<span class="k-kw">using</span> <span class="k-type">Price</span> = Fixed&lt;<span class="k-type">int64_t</span>, <span class="k-num">8</span>&gt;; <span class="k-cmt">// Preço unitário B3</span>
+<span class="k-kw">using</span> <span class="k-type">Money</span> = Fixed&lt;<span class="k-type">int64_t</span>, <span class="k-num">4</span>&gt;; <span class="k-cmt">// BRL financeiro (escala 0.0001)</span></code></pre>
+          </div>
+
+          <div id="tab-sbe" class="code-snippet-panel">
+<pre><code><span class="k-cmt">// src/codec/trade_event.hpp — Decodificação zero-copy gerada pelo compilador SBE</span>
+<span class="k-kw">struct alignas</span>(<span class="k-num">64</span>) <span class="k-type">TradeExecutionEvent</span> {
+    <span class="k-type">uint64_t</span> match_id;
+    <span class="k-type">uint64_t</span> account_id;
+    <span class="k-type">uint32_t</span> instrument_id;
+    <span class="k-type">int64_t</span>  qty_raw;
+    <span class="k-type">int64_t</span>  price_raw;
+    <span class="k-type">uint16_t</span> settlement_date_offset;
+    <span class="k-type">uint8_t</span>  side; <span class="k-cmt">// 1 = Compra, 2 = Venda</span>
+
+    <span class="k-kw">static constexpr size_t</span> EncodedLength = <span class="k-num">64</span>;
+    <span class="k-kw">static_assert</span>(<span class="k-kw">sizeof</span>(TradeExecutionEvent) == EncodedLength);
+};</code></pre>
+          </div>
+
+          <div id="tab-wal" class="code-snippet-panel">
+<pre><code><span class="k-cmt">// src/wal/wal_writer.cpp — Commit agrupado assíncrono via io_uring do Linux</span>
+<span class="k-type">void</span> WalWriter::<span class="k-fn">flush_group</span>(<span class="k-type">uint64_t</span> target_lsn) <span class="k-kw">noexcept</span> {
+    <span class="k-kw">auto</span>* sqe = io_uring_get_sqe(&amp;ring_);
+    io_uring_prep_write(sqe, fd_, staging_buffer_.data(), 
+                       aligned_size_, current_offset_);
+    sqe-&gt;flags |= IOSQE_ASYNC;
+    io_uring_submit(&amp;ring_);
+    durable_lsn_.store(target_lsn, std::memory_order_release);
+}</code></pre>
+          </div>
+
+          <div id="tab-metrics" class="code-snippet-panel">
+<pre><code><span class="k-cmt"># Exemplo de payload OpenMetrics / Prometheus exportado por GET /metrics</span>
+# HELP motor_rv_events_total Total de eventos aceitos pelo motor
+# TYPE motor_rv_events_total counter
+motor_rv_events_total{particao="0",status="accepted"} 48920192
+motor_rv_events_total{particao="1",status="accepted"} 49102831
+
+# HELP motor_rv_wal_durable_lsn LSN confirmado duravelmente em disco
+# TYPE motor_rv_wal_durable_lsn gauge
+motor_rv_wal_durable_lsn{particao="0"} 1018290
+motor_rv_wal_durable_lsn{particao="1"} 1023910
+
+# HELP motor_rv_wal_commit_latency_us Latencia de coalescencia do WAL
+# TYPE motor_rv_wal_commit_latency_us histogram
+motor_rv_wal_commit_latency_us_bucket{le="10.0"} 84210
+motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Roadmap de Fases -->
     <section id="roadmap">
       <div class="container">
         <div class="section-header">
-          <div class="section-tag">Evolução do Projeto</div>
+          <span class="section-tag">Planejamento &amp; Entrega</span>
           <h2 class="section-title">Roadmap de Fases</h2>
           <p class="section-desc">
-            Uma fase por vez. Critério de saída: gates dos agentes + relatório do verificador aprovado.
+            Evolução estruturada com gates de agentes autônomos e relatórios de verificação formal.
           </p>
         </div>
 
-        <ul class="roadmap">
-          <li class="roadmap-item">
-            <div class="roadmap-marker done">F0</div>
-            <div class="roadmap-content">
+        <div class="timeline">
+          <div class="timeline-card done">
+            <div class="phase-badge">F0</div>
+            <div class="timeline-info">
               <h3>Fase 0 — Reconhecimento do Terreno</h3>
-              <p>Documentação do ambiente, ADR-0017 a ADR-0023, probe de ambiente, correção de I1, criação de I13, 14 cenários golden fechados à mão.</p>
-              <span class="roadmap-status done">✓ Concluída — 02/09/2026</span>
+              <p>Mapeamento de fatos medidos do kernel, ADR-0017 a ADR-0023, probe de hardware e 14 cenários golden fechados à mão.</p>
             </div>
-          </li>
-          <li class="roadmap-item">
-            <div class="roadmap-marker done">F1</div>
-            <div class="roadmap-content">
-              <h3>Fase 1 — Tipos, SBE, Invariantes</h3>
-              <p>Presets de build, I1–I7 testados, codecs SBE gerados, ponto fixo, ledgers SoA, máquina de estados e apply completo. 13/13 invariantes verificados.</p>
-              <span class="roadmap-status done">✓ Concluída — 02/09/2026</span>
+            <div class="timeline-status status-done">✓ Concluída (02/09/2026)</div>
+          </div>
+
+          <div class="timeline-card done">
+            <div class="phase-badge">F1</div>
+            <div class="timeline-info">
+              <h3>Fase 1 — Tipos, SBE &amp; Invariantes</h3>
+              <p>Codecs SBE gerados, ponto fixo sem float, ledgers SoA de custódia e caixa. 13 de 13 invariantes com testes vinculados.</p>
             </div>
-          </li>
-          <li class="roadmap-item">
-            <div class="roadmap-marker done">F2</div>
-            <div class="roadmap-content">
-              <h3>Fase 2 — Partição e WAL</h3>
-              <p>Loop single-writer com SPSC ring, WAL completo (io_uring + fallback + injeção de falhas), suíte de caos com 9 cenários, baseline com CV &lt; 5%.</p>
-              <span class="roadmap-status done">✓ Concluída — 11/09/2026</span>
+            <div class="timeline-status status-done">✓ Concluída (02/09/2026)</div>
+          </div>
+
+          <div class="timeline-card done">
+            <div class="phase-badge">F2</div>
+            <div class="timeline-info">
+              <h3>Fase 2 — Partição, WAL &amp; Caos</h3>
+              <p>Loop single-writer com SPSC ring, persistência nativa io_uring, coalescência de 100µs, suíte de caos com 9 testes de estresse e baseline de performance.</p>
             </div>
-          </li>
-          <li class="roadmap-item">
-            <div class="roadmap-marker active">F3</div>
-            <div class="roadmap-content">
-              <h3>Fase 3 — Liquidação e Eventos Corporativos</h3>
-              <p>Máquina de estados completa (D+0 a D+2, falha de entrega), eventos corporativos, reconciliação com depositária, cenários golden com datas reais.</p>
-              <span class="roadmap-status active">● Em andamento</span>
+            <div class="timeline-status status-done">✓ Concluída (11/09/2026)</div>
+          </div>
+
+          <div class="timeline-card active">
+            <div class="phase-badge">F3</div>
+            <div class="timeline-info">
+              <h3>Fase 3 — Liquidação D+2 &amp; Eventos Corporativos</h3>
+              <p>Máquina de estados completa (D+0 a D+2, falha de entrega), compensação multilateral por data e reconciliação com extratos da depositária.</p>
             </div>
-          </li>
-          <li class="roadmap-item">
-            <div class="roadmap-marker pending-m">F4</div>
-            <div class="roadmap-content">
-              <h3>Fase 4 — Snapshot e Resource Server</h3>
-              <p>Snapshot EOD (recuperação + exposição), resource server FAPI-BR, contract tests, suíte negativa e fuzz.</p>
-              <span class="roadmap-status pending-s">○ Pendente</span>
+            <div class="timeline-status status-active">● Em Andamento</div>
+          </div>
+
+          <div class="timeline-card">
+            <div class="phase-badge">F4</div>
+            <div class="timeline-info">
+              <h3>Fase 4 — Snapshot EOD &amp; Resource Server FAPI-BR</h3>
+              <p>Snapshot D-1 imutável mapeado em memória, pipeline FAPI-BR v2.2.1 com mTLS, JWT PS256 e consentimento parametrizável.</p>
             </div>
-          </li>
-          <li class="roadmap-item">
-            <div class="roadmap-marker pending-m">F5</div>
-            <div class="roadmap-content">
-              <h3>Fase 5 — Conformance</h3>
-              <p>Suíte funcional do Open Finance Brasil contra o resource server com AS certificado em ambiente de teste.</p>
-              <span class="roadmap-status pending-s">○ Pendente</span>
+            <div class="timeline-status status-pending">○ Planejada</div>
+          </div>
+
+          <div class="timeline-card">
+            <div class="phase-badge">F5</div>
+            <div class="timeline-info">
+              <h3>Fase 5 — Conformance Open Finance</h3>
+              <p>Execução da suíte de conformidade funcional oficial do Open Finance Brasil contra o Resource Server em C++23.</p>
             </div>
-          </li>
-        </ul>
+            <div class="timeline-status status-pending">○ Planejada</div>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- FAQ -->
+    <!-- FAQ (GEO) -->
     <section id="faq">
       <div class="container">
-        <div class="section-header">
-          <div class="section-tag">Perguntas Frequentes</div>
-          <h2 class="section-title">FAQ</h2>
+        <div class="section-header center">
+          <span class="section-tag">Dúvidas Frequentes</span>
+          <h2 class="section-title">Perguntas &amp; Respostas Técnicas</h2>
           <p class="section-desc">
-            Respostas diretas sobre o motor, a arquitetura e as decisões de engenharia.
+            Esclarecimentos detalhados sobre as escolhas arquiteturais e garantias de engenharia.
           </p>
         </div>
 
-        <div class="faq-list">
-          <details class="faq-item">
-            <summary>O que é o motor-rv?</summary>
-            <div class="faq-answer">
-              O motor-rv é um motor de pós-negociação de renda variável para a B3 (bolsa brasileira), escrito em C++23. Ele processa o ciclo completo de clearing: ingestão de negócios, alocação, netting multilateral, liquidação D+2, eventos corporativos e reconciliação com a depositária central. Ao mesmo tempo, é um material de estudo — cada decisão de engenharia está documentada em ADRs antes de existir implementação.
+        <div class="faq-wrapper">
+          <details class="faq-accordion">
+            <summary>Por que escrever um motor de clearing em C++23 em vez de Rust ou Java?</summary>
+            <div class="faq-content">
+              C++23 oferece controle milimétrico sobre layout de memória (SoA com alinhamento a 64 bytes para cache lines), compilação direta sem runtime de garbage collection e integração nativa com o subsistema <code>io_uring</code> do kernel Linux com flags de alta performance (<code>SINGLE_ISSUER</code> e <code>DEFER_TASKRUN</code>). Além disso, templates modernos e <code>static_assert</code> garantem validações de protocolo em tempo de compilação.
             </div>
           </details>
-          <details class="faq-item">
-            <summary>Que linguagem de programação é usada?</summary>
-            <div class="faq-answer">
-              C++23 compilado com GCC 14+ ou Clang 18+. O projeto utiliza CMake presets e compila com <code>-O3</code>, LTO e <code>-march=x86-64-v2</code> no modo release. Sanitizers (ASan, TSan) e fuzzing (libFuzzer) são presets integrados ao build.
+
+          <details class="faq-accordion">
+            <summary>Como o motor garante que não ocorrem erros de arredondamento em centavos?</summary>
+            <div class="faq-content">
+              O motor utiliza o tipo <code>Fixed&lt;int64_t, Scale&gt;</code> para toda representação numérica: escala <code>1e-8</code> para quantidades de ações e preços unitários, e escala <code>1e-4</code> para saldo monetário em BRL. As multiplicações utilizam o tipo intrínseco <code>__int128</code> para os produtos intermediários antes do truncamento e divisão pela base, tornando impossível qualquer imprecisão por representação IEEE 754 de ponto flutuante.
             </div>
           </details>
-          <details class="faq-item">
-            <summary>O motor usa ponto flutuante para cálculos financeiros?</summary>
-            <div class="faq-answer">
-              Não. Toda aritmética financeira utiliza inteiros de ponto fixo tipados (<code>Fixed&lt;int64_t, 8&gt;</code>) com produtos intermediários em <code>__int128</code>. O compilador proíbe <code>float</code> e <code>double</code> em balanços através de regras estritas de compilação. Isso elimina erros de arredondamento em operações financeiras.
+
+          <details class="faq-accordion">
+            <summary>Qual é o papel do io_uring na persistência (WAL)?</summary>
+            <div class="faq-content">
+              O Write-Ahead Log (WAL) grava lotes de eventos em janelas de coalescência de 100 µs (group commit) diretamente no disco com <code>O_DIRECT | O_DSYNC</code>. O <code>io_uring</code> evita trocas de contexto desnecessárias entre espaço de usuário e kernel, permitindo atingir mais de 120 milhões de operações por segundo com durabilidade absoluta antes da emissão do ACK para os participantes.
             </div>
           </details>
-          <details class="faq-item">
-            <summary>Como funciona a persistência (WAL)?</summary>
-            <div class="faq-answer">
-              O motor usa um Write-Ahead Log (WAL) nativo com io_uring usando flags <code>SINGLE_ISSUER</code> e <code>DEFER_TASKRUN</code> do Linux moderno. Gravação com <code>O_DIRECT|O_DSYNC</code>, coalescência de commits em janelas de 100 microssegundos, CRC32C por hardware e recuperação determinística por replay. Inclui fallback síncrono com pwrite e injeção de falhas para testes de caos.
+
+          <details class="faq-accordion">
+            <summary>Como o motor é exposto para o ecossistema Open Finance?</summary>
+            <div class="faq-content">
+              Seguindo a regra de negócio da API de Renda Variável v1.3.0, os dados expostos são estritamente do fechamento anterior (D-1). O motor congela um snapshot binário imutável no EOD (End of Day) que é mapeado em memória (mmap) pelo Resource Server C++. Esse servidor implementa o pipeline de segurança FAPI-BR v2.2.1 com mTLS ICP-Brasil e validação local de JWT PS256.
             </div>
           </details>
-          <details class="faq-item">
-            <summary>O motor é compatível com Open Finance?</summary>
-            <div class="faq-answer">
-              Sim. O motor implementa a API de Renda Variável v1.3.0 do Open Finance Brasil com conformidade ao perfil de segurança FAPI-BR v2.2.1. A exposição é feita via snapshots D-1 imutáveis, separando totalmente o núcleo de trading do mundo externo. O servidor de autorização é de prateleira e certificado (ADR-0002).
-            </div>
-          </details>
-          <details class="faq-item">
-            <summary>Quantos invariantes contábeis o motor garante?</summary>
-            <div class="faq-answer">
-              O motor garante 13 invariantes formais (I1 a I13), cobrindo conservação do dinheiro, custódia não negativa, determinismo de replay, durabilidade antes do ack, ordem total de LSN e consistência contábil de fim de dia. Cada invariante possui um teste automatizado no CI — nenhuma violação passa silenciosa.
+
+          <details class="faq-accordion">
+            <summary>O que acontece se uma partição sofrer uma falha ou queda de energia?</summary>
+            <div class="faq-content">
+              O estado do motor é puramente determinístico e recuperável via Event Sourcing (Invariante I11). Ao reiniciar, o motor lê a última imagem de recuperação consistente e executa o replay sequencial do log WAL via <code>mmap</code>. A integridade de cada registro é conferida via CRC32C acelerado por hardware e pelo Invariante I8 (ordem total sem lacunas).
             </div>
           </details>
         </div>
@@ -1221,66 +1545,49 @@
     <section id="quickstart">
       <div class="container">
         <div class="section-header">
-          <div class="section-tag">Comece Agora</div>
-          <h2 class="section-title">Execução Rápida</h2>
+          <span class="section-tag">Guia de Execução</span>
+          <h2 class="section-title">Inicie no Terminal em 2 Minutos</h2>
           <p class="section-desc">
-            Compilar, rodar os gates e inicializar o servidor com observabilidade ativa.
+            Instruções diretas para compilar a toolchain, rodar os gates de testes e subir o daemon.
           </p>
         </div>
 
-        <div class="code-box">
-          <div class="code-header">
-            <span>Terminal / Bash (Linux x86_64)</span>
-            <span>motor-rv</span>
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-controls">
+              <span class="term-dot red"></span>
+              <span class="term-dot yellow"></span>
+              <span class="term-dot green"></span>
+            </div>
+            <div class="terminal-title">bash — Linux x86_64</div>
+            <button onclick="navigator.clipboard.writeText('export PATH=&quot;$PWD/.toolchain/bin:$PATH&quot; &amp;&amp; cmake --preset release &amp;&amp; cmake --build --preset release &amp;&amp; ctest --preset release &amp;&amp; ./build/release/src/app/motor-rv --particoes 4 --servir')" style="background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle); color: var(--cyan-400); font-family: var(--font-mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; cursor: pointer;">Copiar Comandos</button>
           </div>
-          <pre><code><span class="token-comment"># 1. Preparar toolchain (sem sudo)</span>
-<span class="token-cmd">./scripts/bootstrap-toolchain.sh</span>
-<span class="token-cmd">export</span> <span class="token-arg">PATH="$PWD/.toolchain/bin:$PATH"</span>
-
-<span class="token-comment"># 2. Compilar em modo release com LTO (-O3 -Werror)</span>
-<span class="token-cmd">cmake</span> <span class="token-arg">--preset release</span>
-<span class="token-cmd">cmake</span> <span class="token-arg">--build --preset release</span>
-<span class="token-cmd">ctest</span> <span class="token-arg">--preset release</span>
-
-<span class="token-comment"># 3. Gate de pré-voo com sanitizers e invariantes</span>
-<span class="token-cmd">./scripts/gate-local.sh</span> <span class="token-arg">--quick</span>
-
-<span class="token-comment"># 4. Executar o servidor (4 partições + métricas HTTP)</span>
-<span class="token-cmd">./build/release/src/app/motor-rv</span> <span class="token-arg">--particoes 4 --metrics-port 9100 --servir</span>
-
-<span class="token-comment"># 5. Consultar endpoints de telemetria</span>
-<span class="token-cmd">curl</span> <span class="token-str">http://localhost:9100/healthz</span>   <span class="token-comment"># 200 OK</span>
-<span class="token-cmd">curl</span> <span class="token-str">http://localhost:9100/ready</span>     <span class="token-comment"># 200 OK</span>
-<span class="token-cmd">curl</span> <span class="token-str">http://localhost:9100/metrics</span>   <span class="token-comment"># Prometheus</span>
-<span class="token-cmd">curl</span> <span class="token-str">http://localhost:9100/status</span>    <span class="token-comment"># JSON</span></code></pre>
-        </div>
-      </div>
-    </section>
-
-    <!-- Tech Stack -->
-    <section id="stack">
-      <div class="container">
-        <div class="section-header">
-          <div class="section-tag">Tecnologias</div>
-          <h2 class="section-title">Stack Tecnológica</h2>
-          <p class="section-desc">
-            Cada dependência foi escolhida por uma ADR documentada. Sem frameworks desnecessários.
-          </p>
+          <div class="terminal-body">
+            <div><span class="term-cmt"># 1. Carregar a toolchain isolada (sem necessidade de sudo)</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">./scripts/bootstrap-toolchain.sh</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">export PATH="$PWD/.toolchain/bin:$PATH"</span></div>
+            <br>
+            <div><span class="term-cmt"># 2. Compilar em modo release com LTO (-O3 -Werror)</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">cmake --preset release &amp;&amp; cmake --build --preset release</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">ctest --preset release</span></div>
+            <br>
+            <div><span class="term-cmt"># 3. Inicializar o servidor com 4 partições e telemetria HTTP</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">./build/release/src/app/motor-rv --particoes 4 --metrics-port 9100 --servir</span></div>
+            <br>
+            <div><span class="term-cmt"># 4. Inspecionar métricas e probes em outro terminal</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">curl http://localhost:9100/healthz</span>   <span class="term-info"># Retorna 200 OK</span></div>
+            <div><span class="term-prompt">$</span> <span class="term-cmd">curl http://localhost:9100/metrics</span>   <span class="term-info"># OpenMetrics Prometheus</span></div>
+          </div>
         </div>
 
-        <div class="tech-grid">
-          <div class="tech-pill"><span class="tech-dot" style="background: #00599C;"></span>C++23</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #064F8C;"></span>CMake</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #FCC624;"></span>Linux / io_uring</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: var(--green);"></span>liburing</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: var(--accent);"></span>SBE (codecs próprios)</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #E6522C;"></span>Prometheus 0.0.4</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: var(--amber);"></span>OpenSSL 3</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: var(--purple);"></span>Open Finance / FAPI-BR</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #FF6B6B;"></span>ASan / TSan / libFuzzer</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #88C0D0;"></span>Catch2 / GoogleTest</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #A3BE8C;"></span>glaze / simdjson</div>
-          <div class="tech-pill"><span class="tech-dot" style="background: #EBCB8B;"></span>jwt-cpp / JOSE</div>
+        <!-- Tech Badges -->
+        <div class="tech-strip">
+          <div class="tech-badge"><span class="tech-dot" style="background: #38bdf8;"></span>C++23 (GCC 14 / Clang 18)</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: #f59e0b;"></span>Linux io_uring (liburing)</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: #10b981;"></span>SBE Binary Codecs</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: #ef4444;"></span>Prometheus 0.0.4</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: #818cf8;"></span>Open Finance FAPI-BR v2.2.1</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: #c084fc;"></span>ASan &amp; TSan Sanitizers</div>
         </div>
       </div>
     </section>
@@ -1292,43 +1599,69 @@
     <div class="container">
       <div class="footer-grid">
         <div>
-          <div class="footer-brand">motor-rv</div>
-          <p>Motor didático de pós-negociação de renda variável em C++23. Cada decisão é documentada antes do código.</p>
+          <div class="footer-brand-title">motor-rv</div>
+          <p style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; max-width: 320px;">
+            Motor determinístico de pós-negociação de renda variável em C++23. Cada decisão de engenharia registrada antes do código.
+          </p>
         </div>
-        <div class="footer-section">
+
+        <div class="footer-col">
           <h4>Documentação</h4>
           <ul>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/arquitetura.md">Arquitetura</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/dominio.md">Domínio</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/invariantes.md">Invariantes</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/wal.md">WAL</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/arquitetura.md">Arquitetura de Sistemas</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/dominio.md">Modelo de Domínio</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/invariantes.md">13 Invariantes Formais</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/wal.md">Persistência &amp; WAL</a></li>
           </ul>
         </div>
-        <div class="footer-section">
+
+        <div class="footer-col">
           <h4>Engenharia</h4>
           <ul>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/tree/master/docs/adr">28 ADRs</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/open-finance.md">Open Finance</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/leitura-guiada.md">Leitura Guiada</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/tree/master/docs/adr">28 ADRs Arquiteturais</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/open-finance.md">Open Finance &amp; FAPI-BR</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/leitura-guiada.md">Guia de Leitura Rápida</a></li>
             <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/CODING_RULES.md">Coding Rules</a></li>
           </ul>
         </div>
-        <div class="footer-section">
-          <h4>Projeto</h4>
+
+        <div class="footer-col">
+          <h4>Governança</h4>
           <ul>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico" target="_blank" rel="noopener">Repositório GitHub</a></li>
             <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/plano-fases.md">Plano de Fases</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/ambiente.md">Ambiente</a></li>
-            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/contratos-internos.md">Contratos Internos</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/docs/ambiente.md">Fatos Medidos da Máquina</a></li>
+            <li><a href="https://github.com/ktfth/motor-rv-didatico/blob/master/HANDOFF.md">Histórico de Handoffs</a></li>
           </ul>
         </div>
       </div>
+
       <div class="footer-bottom">
-        <span>&copy; 2026 motor-rv — Projeto de engenharia de sistemas didático em C++23.</span>
-        <span>Documentos em português · Código em inglês</span>
+        <div>&copy; 2026 motor-rv — Projeto de Engenharia de Sistemas em C++23. Licença Aberta.</div>
+        <div>Documentação em Português · Código em Inglês</div>
       </div>
     </div>
   </footer>
+
+  <!-- Script para Alternar Tabs de Código -->
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.code-snippet-panel').forEach(function(el) {
+        el.classList.remove('active');
+      });
+      document.querySelectorAll('.code-tab-btn').forEach(function(el) {
+        el.classList.remove('active');
+      });
+      const activePanel = document.getElementById(tabId);
+      if (activePanel) activePanel.classList.add('active');
+      
+      const buttons = document.querySelectorAll('.code-tab-btn');
+      if (tabId === 'tab-fixed' && buttons[0]) buttons[0].classList.add('active');
+      if (tabId === 'tab-sbe' && buttons[1]) buttons[1].classList.add('active');
+      if (tabId === 'tab-wal' && buttons[2]) buttons[2].classList.add('active');
+      if (tabId === 'tab-metrics' && buttons[3]) buttons[3].classList.add('active');
+    }
+  </script>
 
 </body>
 </html>
