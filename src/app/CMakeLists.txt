@@ -10,4 +10,4 @@ add_executable(motor-rv-wal-inspect wal_inspect_main.cpp)
 target_link_libraries(motor-rv-wal-inspect PRIVATE motor_rv::flags rv::wal rv::core rv::base)
 
 add_executable(motor-rv motor_main.cpp)
-target_link_libraries(motor-rv PRIVATE motor_rv::flags rv::core rv::wal rv::ingress rv::codec rv::base)
+target_link_libraries(motor-rv PRIVATE motor_rv::flags rv::edge rv::core rv::wal rv::ingress rv::codec rv::base)

@@ -47,15 +47,18 @@ imagem de recuperação. Mesma semente, mesmo resultado.
 | `src/codec/` | runtime SBE + **gerador próprio** (`scripts/sbe_gen.py`, ADR-0017) que emite `static_assert` de tamanho, alinhamento e deslocamento de cada campo, e recusa schema mal formado com mensagem que ensina |
 | `src/core/` | ledgers SoA com bucket vencido, máquina de estados gerada de uma declaração única, `apply()` completo dos dez eventos, loop da partição, outbox com contrapressão, imagem de recuperação por stall-and-copy |
 | `src/format/` | snapshot de exposição D-1: cabeçalho de 4096 bytes exatos, 27 seções, só offsets |
-| `src/ingress/` | particionador congelado com valores golden e simulador determinístico que lê o calendário real da B3 |
-| `src/app/` | `motor-rv-sim` e `motor-rv-wal-inspect` (inspeção e diagnóstico forense de integridade de segmentos WAL) |
+| `src/ingress/` | particionador congelado com valores golden, framing SBE canônico, streaming TCP chunked e simulador determinístico que lê o calendário real da B3 |
+| `src/edge/` | **borda de observabilidade e SLA**: endpoints Open Finance (`endpoint.hpp`), auditoria regulatória R17 (latência P95 com handshake isolado da requisição), R18 (disponibilidade com 2XX/422 sucesso vs 5XX/408 erro), R19 (trilha de auditoria), coletor de métricas Prometheus 0.0.4 e status JSON zero-allocation (`observability.hpp`), e servidor HTTP/1.1 ultraleve não-bloqueante (`metrics_server.hpp`) atendendo `/metrics`, `/healthz`, `/ready` e `/status` |
+| `src/app/` | `motor-rv` (servidor integrado com N partições, io_uring, ingress pipeline e servidor HTTP de métricas/healthcheck), `motor-rv-sim` e `motor-rv-wal-inspect` (inspeção e diagnóstico forense de integridade de segmentos WAL) |
 | `src/wal/` | **completo**: formato (`WalHdr` 32 B, `SegmentHdr`), alinhamento dinâmico via `statx`, três backends de I/O (`io_uring`, `pwrite`, injeção de falhas `fault_backend`), `GroupCommit` com coalescência, leitor sequencial `SegmentReader`, recuperação e replay determinístico a quente (`wal::recover`) com tolerância a corrupção e cauda rasgada |
 | `tests/chaos/` | suíte `test_recovery_chaos` com 9 cenários de falhas extremas (replay determinístico, cauda rasgada, snapshot + replay, falha de IO, corrupção de CRC, saltos de LSN, fallback de snapshot corrompido, replay de rejeições, blocos parciais truncados) |
-| `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes; métricas contratuais de WAL conectadas |
+| `tests/ingress/` | suíte `test_ingress_pipeline` cobrindo fragmentação TCP, roteamento de investidor por DocumentId, broadcast global e contrapressão |
+| `tests/edge/` | suítes `test_r17_latency_slo` (isolamento de handshake e P95), `test_r18_availability_classes` (sucessos 2XX/422 vs falhas 5XX/408 e classificação por Stage) e `test_observability` (renderização de métricas Prometheus, status JSON e servidor HTTP com requisições reais via socket) |
+| `bench/` | harness próprio (ADR-0021): aquecimento, descarte de série por CV, histograma sem alocação, bloco `ambiente` e `carga` preenchidos pelo programa, comparador que sai != 0 em regressão e recusa comparar cargas diferentes; métricas contratuais de WAL e Ingress conectadas |
 | `scripts/` | `gate-local.sh` (pré-voo rápido e full), `quick-bench.sh`, `setup-hooks.sh`, `commit-and-handoff.sh`, hooks de `pre-commit` e `post-commit`, `check_invariants.py`, `gera-calendario.py`, `sbe_gen.py`, `relatorio-bench.py` |
 | `bench/contrato.hpp` | a ÚNICA tabela de métricas: alimenta o JSON, o comparador e o relatório, e declara à parte quem pode reprovar um PR (ADR-0026, ADR-0028) |
 
-### Testes — 6 suítes, 13/13 invariantes
+### Testes — 18 testes, 13/13 invariantes
 
 | Suíte | Cobre |
 |---|---|
@@ -65,6 +68,10 @@ imagem de recuperação. Mesma semente, mesmo resultado.
 | `test_replay_equivalence` | I11 com imagem de estado em 6 pontos de corte; I12 |
 | `test_outbox_gate` | I10 nas três frentes (portão, loop, congelamento) |
 | `test_format` | formato do WAL e equivalência entre backends |
+| `test_ingress_pipeline` | framing SBE, decodificação streaming, particionamento e broadcast |
+| `test_r17_latency_slo` | R17: medição P95 de latência com handshake TLS separado da requisição |
+| `test_r18_availability_classes` | R18: classificação de disponibilidade (2XX/422 sucesso vs 5XX/408 erro) |
+| `test_observability` | Prometheus exposition 0.0.4, status JSON, healthz e servidor HTTP TCP |
 
 `tests/domain/golden/` traz **14 cenários** com todos os números fechados **à mão antes de existir
 código**, cada um citando o invariante que exercita. É a especificação executável do domínio.

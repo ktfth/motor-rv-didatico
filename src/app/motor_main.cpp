@@ -26,6 +26,8 @@
 #include "codec/template_ids.hpp"
 #include "core/partition.hpp"
 #include "core/state_image.hpp"
+#include "edge/metrics_server.hpp"
+#include "edge/observability.hpp"
 #include "ingress/ingress_pipeline.hpp"
 #include "ingress/simulator.hpp"
 #include "wal/io_uring_backend.hpp"
@@ -97,6 +99,10 @@ void print_usage(const char* prog) {
   std::printf("uso: %s [opções]\n", prog);
   std::printf("  --particoes N      número de partições (potência de 2, padrão: 4)\n");
   std::printf("  --dir-wal DIR      diretório base dos arquivos WAL (padrão: /tmp/motor-rv-wal)\n");
+  std::printf("  --metrics-port P   porta HTTP de métricas e healthz (padrão: 9100, 0=desativa)\n");
+  std::printf(
+      "  --servir, -s       mantém o servidor HTTP ativo após a carga até receber "
+      "SIGINT/SIGTERM\n");
   std::printf("  --dias N           pregões simulados no lote (padrão: 1)\n");
   std::printf("  --negocios N       negócios por pregão (padrão: 5000)\n");
   std::printf("  --investidores N   número de investidores (padrão: 500)\n");
@@ -109,6 +115,8 @@ void print_usage(const char* prog) {
 int main(int argc, char** argv) {
   uint32_t num_particoes = 4;
   std::string dir_wal = "/tmp/motor-rv-wal";
+  uint16_t metrics_port = 9100;
+  bool modo_servidor = false;
   uint32_t dias = 1;
   uint32_t negocios_por_dia = 5000;
   uint32_t investidores = 500;
@@ -122,6 +130,10 @@ int main(int argc, char** argv) {
       num_particoes = static_cast<uint32_t>(std::stoul(argv[++i]));
     } else if (a == "--dir-wal" && tem) {
       dir_wal = argv[++i];
+    } else if (a == "--metrics-port" && tem) {
+      metrics_port = static_cast<uint16_t>(std::stoul(argv[++i]));
+    } else if (a == "--servir" || a == "-s") {
+      modo_servidor = true;
     } else if (a == "--dias" && tem) {
       dias = static_cast<uint32_t>(std::stoul(argv[++i]));
     } else if (a == "--negocios" && tem) {
@@ -176,8 +188,74 @@ int main(int argc, char** argv) {
         p->backend.single_issuer(), p->backend.defer_taskrun());
   }
 
-  // 2. Conectar IngressPipeline
+  // 2. Conectar IngressPipeline e Borda de Observabilidade
   rv::ingress::IngressPipeline pipeline(inboxes);
+
+  rv::edge::ObservabilityCollector coletor;
+  coletor.set_partition_count(num_particoes);
+
+  auto atualiza_metricas_coletor = [&]() {
+    for (const auto& p : particoes) {
+      rv::edge::PartitionMetricsSnapshot snap{};
+      snap.partition_id = p->id;
+      snap.last_lsn = p->wal->last_lsn().v;
+      snap.durable_lsn = p->wal->durable_lsn().v;
+      snap.custody_checksum = p->estado.custody_checksum();
+      snap.halted = (p->estado.flags & rv::core::PartitionState::kFlagReconDivergence) != 0;
+      snap.active_accounts = p->estado.account_index.size();
+      snap.active_positions = p->estado.position_index.size();
+      snap.apply_accepted = p->metricas.apply_accepted;
+      snap.apply_rejected = p->metricas.apply_rejected;
+      snap.apply_fatal = p->metricas.apply_fatal;
+      snap.trades_closed = p->metricas.trades_closed;
+      std::memcpy(snap.rejected_by_code, p->metricas.rejected_by_code,
+                  sizeof(snap.rejected_by_code));
+      snap.wal_appends = p->metricas.wal_appends;
+      snap.wal_groups = p->metricas.wal_groups;
+      snap.wal_bytes = p->metricas.wal_bytes;
+      snap.wal_full = p->metricas.wal_full;
+      snap.wal_lat_p50_ns = p->metricas.durable_latency_ns.quantile(0.5);
+      snap.wal_lat_p90_ns = p->metricas.durable_latency_ns.quantile(0.9);
+      snap.wal_lat_p99_ns = p->metricas.durable_latency_ns.quantile(0.99);
+      snap.wal_lat_p999_ns = p->metricas.durable_latency_ns.quantile(0.999);
+      snap.wal_lat_max_ns = p->metricas.durable_latency_ns.max();
+      snap.wal_lat_sum_ns = p->metricas.durable_latency_ns.sum();
+      snap.wal_lat_count = p->metricas.durable_latency_ns.count();
+      snap.outbox_staged = p->metricas.outbox_staged;
+      snap.outbox_released = p->metricas.outbox_released;
+      snap.outbox_full = p->metricas.outbox_full;
+      coletor.update_partition(snap);
+    }
+    const auto& istats = pipeline.stats();
+    rv::edge::IngressMetricsSnapshot is{};
+    is.bytes_received = istats.bytes_received;
+    is.events_received = istats.events_received;
+    is.events_routed = istats.events_routed;
+    is.events_broadcast = istats.events_broadcast;
+    is.backpressure_drops = istats.backpressure_drops;
+    is.parse_errors = istats.parse_errors;
+    coletor.update_ingress(is);
+  };
+
+  rv::edge::MetricsServer metrics_server;
+  if (metrics_port > 0) {
+    if (metrics_server.start(metrics_port, coletor)) {
+      std::printf("  Borda Observabilidade: ativa na porta %u\n", metrics_server.bound_port());
+      std::printf("    - Métricas Prometheus : http://localhost:%u/metrics\n",
+                  metrics_server.bound_port());
+      std::printf("    - Healthcheck Liveness: http://localhost:%u/healthz\n",
+                  metrics_server.bound_port());
+      std::printf("    - Readiness Probe     : http://localhost:%u/ready\n",
+                  metrics_server.bound_port());
+      std::printf("    - Status Consolidado  : http://localhost:%u/status\n",
+                  metrics_server.bound_port());
+    } else {
+      std::fprintf(stderr, "AVISO: falha ao iniciar servidor de métricas na porta %u\n",
+                   metrics_port);
+    }
+  }
+  coletor.set_ready(true);
+  atualiza_metricas_coletor();
 
   // 3. Gerar sessão de eventos determinísticos
   rv::ingress::ConfigSimulacao cfg_sim{};
@@ -236,6 +314,10 @@ int main(int argc, char** argv) {
       p->loop->poll(ts_simulado);
     }
     eventos_processados++;
+
+    if ((eventos_processados % 1000) == 0) {
+      atualiza_metricas_coletor();
+    }
   }
 
   // 5. Drenagem e sincronização final de commits de WAL
@@ -247,6 +329,8 @@ int main(int argc, char** argv) {
     (void)p->wal->force_commit(ts_fim);
     (void)p->wal->reap();
   }
+
+  atualiza_metricas_coletor();
 
   const auto fim = std::chrono::steady_clock::now();
   const double duracao_s = std::chrono::duration<double>(fim - inicio).count();
@@ -277,6 +361,24 @@ int main(int argc, char** argv) {
         p->estado.custody_checksum());
   }
   std::printf("  Total agregado de rejeições: %lu\n", total_rejeicoes);
+
+  if (metrics_server.is_running()) {
+    std::printf("\n[Borda de Observabilidade]\n");
+    std::printf("  Saúde do nó (is_healthy): %s\n", coletor.is_healthy() ? "OK" : "DEGRADED");
+    std::printf("  Prontidão (is_ready)    : %s\n", coletor.is_ready() ? "READY" : "NOT READY");
+
+    if (modo_servidor) {
+      std::printf("==> Servidor HTTP ouvindo na porta %u. Pressione Ctrl+C para encerrar...\n",
+                  metrics_server.bound_port());
+      while (g_rodando.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+      std::printf("\n==> Sinal de parada recebido. Encerrando servidor...\n");
+    }
+
+    metrics_server.stop();
+    std::printf("  Servidor de métricas encerrado graciosamente.\n");
+  }
   std::printf("==================================================================\n");
   std::printf("✓ Servidor motor-rv finalizado com sucesso.\n");
 
