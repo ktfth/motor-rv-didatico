@@ -22,6 +22,7 @@ add_executable(motor-rv-bench
   bench_nucleo.cpp
   bench_snapshot.cpp
   bench_wal.cpp
+  bench_ingress.cpp
 )
 
 target_link_libraries(motor-rv-bench

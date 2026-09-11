@@ -22,4 +22,7 @@ void registra_snapshot(Runner& r, const Carga& carga);
 // (Wal/group_commit/recovery).
 void registra_wal(Runner& r, const Carga& carga, const std::string& dir);
 
+// O pipeline de ingress: decodificação de framing SBE e roteamento para os rings das partições.
+void registra_ingress(Runner& r);
+
 }  // namespace rv::bench

@@ -33,7 +33,7 @@ void uso() {
   (void)std::puts(
       "uso: motor-rv-bench [opções]\n"
       "\n"
-      "  --suites LISTA        base,nucleo,snapshot,wal (padrão: todas)\n"
+      "  --suites LISTA        base,nucleo,snapshot,wal,ingress (padrão: todas)\n"
       "  --repeticoes N        repetições por série (padrão 7)\n"
       "  --aquecimento N       repetições descartadas antes de medir (padrão 2)\n"
       "  --limiar-cv PCT       acima disto a série é descartada e refeita (padrão 5)\n"
@@ -224,6 +224,7 @@ int main(int argc, char** argv) {
   if (tem(suites, "nucleo")) rv::bench::registra_nucleo(runner, carga);
   if (tem(suites, "snapshot")) rv::bench::registra_snapshot(runner, carga);
   if (tem(suites, "wal")) rv::bench::registra_wal(runner, carga, dir_wal);
+  if (tem(suites, "ingress")) rv::bench::registra_ingress(runner);
 
   // O contrato antes de qualquer publicação: se uma suíte rodou e a série que alimenta uma métrica
   // obrigatória não está entre as registradas, o nome mudou de um lado só. Publicar assim daria um
