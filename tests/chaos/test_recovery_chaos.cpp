@@ -491,5 +491,215 @@ TEST(ChaosRecovery, SaltoDeLsnRejeitadoDeterminante) {
   EXPECT_EQ(s.applied_lsn.v, 7u);
 }
 
+// I11, I12 — Snapshot corrompido em disco é descartado e recuperação faz fallback para o log base
+TEST(ChaosRecovery, SnapshotCorrompidoFazFallbackParaLogBase) {
+  DirTemp dt;
+  PwriteBackend be;
+  Wal wal{be};
+
+  WalOptions opts{};
+  opts.dir = dt.path();
+  opts.partition = PartitionId{0};
+  opts.block_size = 4096;
+  ASSERT_TRUE(wal.open(opts).is_ok());
+
+  static constexpr size_t kBytes = 64u << 20;
+  std::unique_ptr<std::byte[]> mem1{new std::byte[kBytes]};
+  Arena a1{mem1.get(), kBytes};
+
+  core::PartitionState s1{};
+  ASSERT_TRUE(s1.init(a1, PartitionId{0}, capacidade_teste()));
+
+  core::Outbox outbox1{};
+  ASSERT_TRUE(outbox1.init(a1, 256, 64u << 10));
+  core::Inbox* entrada1 = a1.emplace<core::Inbox>();
+  a1.seal();
+
+  Metrics m1{};
+  core::Partition<Wal> part1{s1, wal, *entrada1, outbox1, m1};
+
+  const auto eventos = gera_sessao(333, 30);
+  // Aplica eventos 1..15
+  for (size_t i = 0; i < 15; ++i) {
+    core::IngressFrame* f = nullptr;
+    while ((f = entrada1->claim()) == nullptr) part1.poll(1000 + i);
+    f->arrival_ts_ns = 1000 + i;
+    f->tmpl = eventos[i].tmpl;
+    f->len = eventos[i].len;
+    std::memcpy(f->payload, eventos[i].bytes, eventos[i].len);
+    entrada1->publish();
+    part1.poll(1000 + i);
+  }
+  while (entrada1->peek() != nullptr) part1.poll(50'000);
+  ASSERT_TRUE(wal.force_commit(60'000).is_ok());
+
+  // Salva snapshot no LSN 15
+  ASSERT_TRUE(wal.snapshot(s1, s1.applied_lsn).is_ok());
+
+  // Aplica eventos 16..30
+  for (size_t i = 15; i < 30; ++i) {
+    core::IngressFrame* f = nullptr;
+    while ((f = entrada1->claim()) == nullptr) part1.poll(100'000 + i);
+    f->arrival_ts_ns = 100'000 + i;
+    f->tmpl = eventos[i].tmpl;
+    f->len = eventos[i].len;
+    std::memcpy(f->payload, eventos[i].bytes, eventos[i].len);
+    entrada1->publish();
+    part1.poll(100'000 + i);
+  }
+  while (entrada1->peek() != nullptr) part1.poll(200'000);
+  ASSERT_TRUE(wal.force_commit(250'000).is_ok());
+
+  const uint64_t target_custody = s1.custody_checksum();
+  const uint64_t target_cash = s1.cash_checksum();
+  wal.close();
+
+  // Localiza o arquivo .img e corrompe seu cabeçalho
+  char snap_name[256]{};
+  std::snprintf(snap_name, sizeof(snap_name), "state_p0_%016llx.img", 15ULL);
+  const std::string snap_path = dt.arquivo(snap_name);
+  int fd = ::open(snap_path.c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  uint8_t lixo[32]{0xFF, 0xEE, 0xDD, 0xCC};
+  ASSERT_EQ(::pwrite(fd, lixo, sizeof(lixo), 0), static_cast<ssize_t>(sizeof(lixo)));
+  ::close(fd);
+
+  // Agora executamos recover(): deve rejeitar a imagem corrompida e reconstruir tudo a partir do
+  // log
+  std::unique_ptr<std::byte[]> mem2{new std::byte[kBytes]};
+  Arena a2{mem2.get(), kBytes};
+  core::PartitionState s2{};
+  ASSERT_TRUE(s2.init(a2, PartitionId{0}, capacidade_teste()));
+
+  Metrics m2{};
+  WalTail tail{};
+  auto r_rec = recover(s2, a2, m2, dt.path(), PartitionId{0}, tail);
+  ASSERT_TRUE(r_rec.is_ok());
+  EXPECT_EQ(r_rec->image_lsn.v, 0u) << "descartou snapshot corrompido e partiu da raiz";
+  EXPECT_EQ(s2.applied_lsn.v, 30u);
+  EXPECT_EQ(s2.custody_checksum(), target_custody)
+      << "I11: recuperação reconstruiu estado idêntico via fallback";
+  EXPECT_EQ(s2.cash_checksum(), target_cash);
+}
+
+// I8, I11, I12 — Replay reproduz exatamente as mesmas rejeições de domínio (rejeição
+// determinística)
+TEST(ChaosRecovery, RejeicoesDeDominioReproduzidasComDeterminismoNoReplay) {
+  DirTemp dt;
+  PwriteBackend be;
+  Wal wal{be};
+
+  WalOptions opts{};
+  opts.dir = dt.path();
+  opts.partition = PartitionId{0};
+  opts.block_size = 4096;
+  ASSERT_TRUE(wal.open(opts).is_ok());
+
+  static constexpr size_t kBytes = 64u << 20;
+  std::unique_ptr<std::byte[]> mem1{new std::byte[kBytes]};
+  Arena a1{mem1.get(), kBytes};
+
+  core::PartitionState s1{};
+  ASSERT_TRUE(s1.init(a1, PartitionId{0}, capacidade_teste()));
+
+  core::Outbox outbox1{};
+  ASSERT_TRUE(outbox1.init(a1, 256, 64u << 10));
+  core::Inbox* entrada1 = a1.emplace<core::Inbox>();
+  a1.seal();
+
+  Metrics m1{};
+  core::Partition<Wal> part1{s1, wal, *entrada1, outbox1, m1};
+
+  // 60 eventos contendo negócios com data inválida e duplicatas corporativas
+  const auto eventos = gera_sessao(1234, 60);
+  for (size_t i = 0; i < eventos.size(); ++i) {
+    core::IngressFrame* f = nullptr;
+    while ((f = entrada1->claim()) == nullptr) part1.poll(1000 + i);
+    f->arrival_ts_ns = 1000 + i;
+    f->tmpl = eventos[i].tmpl;
+    f->len = eventos[i].len;
+    std::memcpy(f->payload, eventos[i].bytes, eventos[i].len);
+    entrada1->publish();
+    part1.poll(1000 + i);
+  }
+  while (entrada1->peek() != nullptr) part1.poll(500'000);
+  ASSERT_TRUE(wal.force_commit(600'000).is_ok());
+
+  const uint64_t rejected_ao_vivo = m1.apply_rejected;
+  EXPECT_GT(rejected_ao_vivo, 0u) << "a sessão gerada contém rejeições determinísticas planejadas";
+  const uint64_t custody_chk = s1.custody_checksum();
+  const uint64_t cash_chk = s1.cash_checksum();
+  const uint64_t last_applied = s1.applied_lsn.v;
+
+  wal.close();
+
+  // Replay a partir do log
+  std::unique_ptr<std::byte[]> mem2{new std::byte[kBytes]};
+  Arena a2{mem2.get(), kBytes};
+  core::PartitionState s2{};
+  ASSERT_TRUE(s2.init(a2, PartitionId{0}, capacidade_teste()));
+
+  Metrics m2{};
+  WalTail tail{};
+  auto r_rec = recover(s2, a2, m2, dt.path(), PartitionId{0}, tail);
+  ASSERT_TRUE(r_rec.is_ok());
+
+  EXPECT_EQ(r_rec->records_rejected, rejected_ao_vivo)
+      << "I12: contagem de rejeições durante replay idêntica à execução original";
+  EXPECT_EQ(s2.applied_lsn.v, last_applied);
+  EXPECT_EQ(s2.custody_checksum(), custody_chk);
+  EXPECT_EQ(s2.cash_checksum(), cash_chk);
+}
+
+// I8 — Bloco truncado no preenchimento de zeros é lido até o último bloco íntegro sem crash
+TEST(ChaosRecovery, BlocoTruncadoAposUltimoRegistroValido) {
+  DirTemp dt;
+  PwriteBackend be;
+  Wal wal{be};
+
+  WalOptions opts{};
+  opts.dir = dt.path();
+  opts.partition = PartitionId{0};
+  opts.block_size = 4096;
+  ASSERT_TRUE(wal.open(opts).is_ok());
+
+  const auto eventos = gera_sessao(101, 8);
+  for (size_t i = 0; i < 8; ++i) {
+    ASSERT_TRUE(
+        wal.append(eventos[i].tmpl, ByteSpan{eventos[i].bytes, eventos[i].len}, 1000 * (i + 1))
+            .is_ok());
+  }
+  ASSERT_TRUE(wal.force_commit(50'000).is_ok());
+  EXPECT_EQ(wal.durable_lsn().v, 8u);
+
+  char seg_path[256]{};
+  std::strncpy(seg_path, wal.segment().path(), sizeof(seg_path) - 1);
+  const uint64_t offset_final = wal.segment_offset();
+  wal.close();
+
+  // Adiciona 512 bytes parciais de lixo após o bloco gravado (simulando corte de I/O em bloco
+  // incompleto)
+  int fd = ::open(seg_path, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  uint8_t lixo[512]{0x42, 0x13, 0x37};
+  ASSERT_EQ(::pwrite(fd, lixo, sizeof(lixo), static_cast<off_t>(offset_final)),
+            static_cast<ssize_t>(sizeof(lixo)));
+  ::close(fd);
+
+  static constexpr size_t kBytes = 64u << 20;
+  std::unique_ptr<std::byte[]> mem{new std::byte[kBytes]};
+  Arena a{mem.get(), kBytes};
+  core::PartitionState s{};
+  ASSERT_TRUE(s.init(a, PartitionId{0}, capacidade_teste()));
+
+  Metrics m{};
+  WalTail tail{};
+  auto r_rec = recover(s, a, m, dt.path(), PartitionId{0}, tail);
+  ASSERT_TRUE(r_rec.is_ok());
+  EXPECT_EQ(r_rec->last_valid_lsn.v, 8u)
+      << "I8: lê os 8 registros íntegros do bloco e descarta cauda incompleta";
+  EXPECT_EQ(s.applied_lsn.v, 8u);
+}
+
 }  // namespace
 }  // namespace rv::wal
