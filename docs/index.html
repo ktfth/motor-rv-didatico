@@ -29,7 +29,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "motor-rv",
-    "headline": "Motor de Pós-Negociação de Renda Variável em C++23",
+    "headline": "Motor de Renda Variável em C++23",
     "description": "Motor determinístico de pós-negociação de renda variável (clearing B3) em C++23 com arquitetura shared-nothing, persistência WAL nativa via io_uring, 13 invariantes contábeis formais verificados em CI, zero alocações no hot path e conformidade Open Finance FAPI-BR v2.2.1.",
     "applicationCategory": "FinancialSoftware",
     "operatingSystem": "Linux x86_64",
@@ -60,10 +60,10 @@
     "mainEntity": [
       {
         "@type": "Question",
-        "name": "O que é o motor-rv?",
+        "name": "O que é o Motor de Renda Variável?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "O motor-rv é um motor de pós-negociação de renda variável para a B3 (bolsa brasileira), escrito em C++23. Ele processa o ciclo completo de clearing: ingestão de negócios, alocação, netting multilateral, liquidação D+2, eventos corporativos e reconciliação com a depositária central. Ao mesmo tempo, é um material de estudo: cada decisão de engenharia é documentada em ADRs antes de ser implementada."
+          "text": "O Motor de Renda Variável (motor-rv) é um motor de pós-negociação para a B3 escrito em C++23. Ele processa o ciclo completo de clearing: ingestão de negócios, alocação, netting multilateral, liquidação D+2, eventos corporativos e reconciliação com a depositária central. Cada decisão de engenharia é documentada em ADRs antes de ser implementada."
         }
       },
       {
@@ -116,7 +116,7 @@
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     "itemListElement": [
-      { "@type": "ListItem", "position": 1, "name": "motor-rv", "item": "https://ktfth.github.io/motor-rv-didatico/" },
+      { "@type": "ListItem", "position": 1, "name": "Motor de Renda Variável", "item": "https://ktfth.github.io/motor-rv-didatico/" },
       { "@type": "ListItem", "position": 2, "name": "Arquitetura", "item": "https://github.com/ktfth/motor-rv-didatico/blob/master/docs/arquitetura.md" },
       { "@type": "ListItem", "position": 3, "name": "ADRs", "item": "https://github.com/ktfth/motor-rv-didatico/tree/master/docs/adr" },
       { "@type": "ListItem", "position": 4, "name": "Invariantes", "item": "https://github.com/ktfth/motor-rv-didatico/blob/master/docs/invariantes.md" }
@@ -126,42 +126,41 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   
   <style>
     :root {
-      --bg-base: #04070d;
-      --bg-elevated: #080d18;
-      --bg-card: rgba(13, 20, 36, 0.7);
-      --bg-card-hover: rgba(18, 28, 50, 0.85);
-      --bg-glass: rgba(15, 23, 42, 0.65);
+      /* Paleta Automotiva & Fibra de Carbono */
+      --carbon-pure: #07090d;
+      --carbon-base: #0b0f17;
+      --carbon-weave-dark: #080c12;
+      --carbon-weave-light: #121824;
       
-      --border-subtle: rgba(255, 255, 255, 0.07);
-      --border-medium: rgba(56, 189, 248, 0.2);
-      --border-glow: rgba(56, 189, 248, 0.45);
+      --billet-metal: #242e3f;
+      --billet-metal-light: #3d4d68;
+      --titanium-border: rgba(255, 255, 255, 0.14);
+      --titanium-bevel: rgba(255, 255, 255, 0.28);
       
-      --text-main: #f8fafc;
-      --text-secondary: #94a3b8;
-      --text-muted: #64748b;
+      --racing-cyan: #00d2ff;
+      --racing-cyan-glow: rgba(0, 210, 255, 0.25);
       
-      --cyan-400: #38bdf8;
-      --cyan-500: #0ea5e9;
-      --cyan-glow: rgba(56, 189, 248, 0.15);
+      --racing-amber: #ff9d00;
+      --racing-amber-glow: rgba(255, 157, 0, 0.25);
       
-      --indigo-400: #818cf8;
-      --indigo-glow: rgba(129, 140, 248, 0.15);
+      --racing-red: #ff2a4b;
+      --racing-red-glow: rgba(255, 42, 75, 0.3);
       
-      --emerald-400: #34d399;
-      --emerald-glow: rgba(52, 211, 153, 0.15);
+      --racing-green: #00e676;
+      --racing-green-glow: rgba(0, 230, 118, 0.25);
       
-      --amber-400: #fbbf24;
-      --amber-glow: rgba(251, 191, 36, 0.15);
+      --text-main: #f1f5f9;
+      --text-silver: #cbd5e1;
+      --text-muted: #7888a0;
       
-      --purple-400: #c084fc;
-      
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+      --font-display: 'Chakra Petch', sans-serif;
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
     }
 
     * {
@@ -172,15 +171,24 @@
 
     html {
       scroll-behavior: smooth;
-      background-color: var(--bg-base);
+      background-color: var(--carbon-pure);
     }
 
+    /* Fundo com Textura Twill Weave 2x2 Realista de Fibra de Carbono */
     body {
-      background-color: var(--bg-base);
+      background-color: var(--carbon-pure);
       background-image: 
-        radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 85% 25%, rgba(129, 140, 248, 0.07) 0%, transparent 45%),
-        radial-gradient(circle at 50% 65%, rgba(52, 211, 153, 0.05) 0%, transparent 50%);
+        /* Trama de carbono 45 graus */
+        linear-gradient(45deg, rgba(0, 0, 0, 0.7) 25%, transparent 25%), 
+        linear-gradient(-45deg, rgba(0, 0, 0, 0.7) 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, rgba(0, 0, 0, 0.7) 75%), 
+        linear-gradient(-45deg, transparent 75%, rgba(0, 0, 0, 0.7) 75%),
+        /* Reflexo especular e iluminação de cockpit */
+        radial-gradient(circle at 50% 0%, rgba(0, 210, 255, 0.12) 0%, transparent 50%),
+        radial-gradient(circle at 10% 30%, rgba(255, 157, 0, 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 70%, rgba(0, 230, 118, 0.04) 0%, transparent 40%),
+        linear-gradient(180deg, #090c12 0%, #05070a 100%);
+      background-size: 8px 8px, 8px 8px, 8px 8px, 8px 8px, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
       background-attachment: fixed;
       color: var(--text-main);
       font-family: var(--font-sans);
@@ -195,10 +203,10 @@
       position: absolute;
       top: -100px;
       left: 20px;
-      background: var(--cyan-400);
+      background: var(--racing-cyan);
       color: #020617;
       padding: 10px 18px;
-      border-radius: 6px;
+      border-radius: 4px;
       font-weight: 700;
       z-index: 1000;
       text-decoration: none;
@@ -207,7 +215,7 @@
     .skip-link:focus { top: 20px; }
 
     *:focus-visible {
-      outline: 2px solid var(--cyan-400);
+      outline: 2px solid var(--racing-cyan);
       outline-offset: 3px;
     }
 
@@ -217,15 +225,57 @@
       padding: 0 24px;
     }
 
-    /* ========== NAVIGATION ========== */
+    /* ========== ESTILO DE FIBRA DE CARBONO & ALUMÍNIO USINADO ========== */
+    .carbon-surface {
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 40%),
+        repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.45) 0, rgba(0, 0, 0, 0.45) 2px, transparent 2px, transparent 4px),
+        repeating-linear-gradient(-45deg, rgba(16, 23, 36, 0.85) 0, rgba(16, 23, 36, 0.85) 2px, #0b0f17 2px, #0b0f17 4px);
+      border: 1px solid var(--titanium-border);
+      box-shadow: 
+        inset 0 1px 1px var(--titanium-bevel),
+        0 16px 36px rgba(0, 0, 0, 0.7);
+      border-radius: 12px;
+      position: relative;
+    }
+
+    .carbon-surface::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 12px;
+      pointer-events: none;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    /* Parafusos de Titânio Automotivo (Torx/Hex nos cantos) */
+    .titanium-bolts {
+      position: relative;
+    }
+    .titanium-bolts::before, .titanium-bolts::after {
+      content: '⬡';
+      position: absolute;
+      font-size: 11px;
+      color: var(--billet-metal-light);
+      text-shadow: 0 1px 0 rgba(255,255,255,0.2), 0 -1px 0 #000;
+      top: 8px;
+      line-height: 1;
+      font-family: var(--font-mono);
+      opacity: 0.75;
+    }
+    .titanium-bolts::before { left: 10px; }
+    .titanium-bolts::after { right: 10px; }
+
+    /* ========== HEADER AUTOMOTIVO / COCKPIT ========== */
     header {
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(4, 7, 13, 0.8);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(7, 9, 13, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--titanium-border);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.08);
     }
 
     .nav-bar {
@@ -239,38 +289,45 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      font-weight: 800;
-      font-size: 1.25rem;
-      letter-spacing: -0.03em;
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.3rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
       color: #fff;
       text-decoration: none;
     }
 
-    .brand-logo-gem {
-      width: 28px;
-      height: 28px;
-      background: linear-gradient(135deg, var(--cyan-400), var(--indigo-400));
+    .brand-logo-shield {
+      width: 34px;
+      height: 34px;
+      background: 
+        radial-gradient(circle at 30% 30%, rgba(255,255,255,0.3) 0%, transparent 60%),
+        linear-gradient(135deg, #1e293b 0%, #090d14 100%);
+      border: 1px solid var(--racing-cyan);
+      box-shadow: 0 0 16px var(--racing-cyan-glow), inset 0 1px 1px #fff;
       border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+      transform: skewX(-6deg);
     }
-    .brand-logo-gem svg {
-      width: 16px;
-      height: 16px;
-      fill: #020617;
+    .brand-logo-shield svg {
+      width: 18px;
+      height: 18px;
+      fill: var(--racing-cyan);
     }
 
     .brand-badge {
       font-family: var(--font-mono);
       font-size: 0.72rem;
-      font-weight: 600;
-      background: rgba(56, 189, 248, 0.12);
-      color: var(--cyan-400);
-      border: 1px solid rgba(56, 189, 248, 0.3);
+      font-weight: 700;
+      background: linear-gradient(180deg, #1e293b 0%, #0b0f17 100%);
+      color: var(--racing-cyan);
+      border: 1px solid rgba(0, 210, 255, 0.4);
       padding: 3px 8px;
-      border-radius: 6px;
+      border-radius: 4px;
+      text-shadow: 0 0 8px var(--racing-cyan-glow);
     }
 
     .nav-links {
@@ -281,37 +338,46 @@
     }
 
     .nav-links a {
-      color: var(--text-secondary);
+      color: var(--text-silver);
       text-decoration: none;
-      font-size: 0.92rem;
-      font-weight: 500;
-      transition: color 0.15s ease;
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
     }
 
     .nav-links a:hover {
-      color: #fff;
+      color: var(--racing-cyan);
+      text-shadow: 0 0 10px var(--racing-cyan-glow);
     }
 
     .nav-github-btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 16px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
+      padding: 8px 18px;
+      background: 
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.4) 100%),
+        #121927;
+      border: 1px solid var(--titanium-border);
+      border-radius: 6px;
       color: #fff !important;
-      font-weight: 600 !important;
-      font-size: 0.88rem !important;
+      font-family: var(--font-display) !important;
+      font-weight: 700 !important;
+      font-size: 0.9rem !important;
+      text-transform: uppercase;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 4px 12px rgba(0,0,0,0.5);
       transition: all 0.2s ease;
     }
     .nav-github-btn:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: var(--border-medium);
+      border-color: var(--racing-cyan);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 20px var(--racing-cyan-glow);
       transform: translateY(-1px);
     }
 
-    /* Mobile menu */
+    /* Mobile hamburger */
     .menu-toggle { display: none; }
     .hamburger {
       display: none;
@@ -322,15 +388,16 @@
       height: 40px;
       cursor: pointer;
       padding: 8px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.03);
+      border-radius: 6px;
+      background: #121927;
+      border: 1px solid var(--titanium-border);
     }
     .hamburger span {
       display: block;
       width: 100%;
       height: 2px;
       background: var(--text-main);
-      border-radius: 2px;
+      border-radius: 1px;
       transition: all 0.25s ease;
     }
 
@@ -342,25 +409,26 @@
         left: 0;
         right: 0;
         bottom: 0;
-        background: rgba(4, 7, 13, 0.98);
-        backdrop-filter: blur(20px);
+        background: rgba(7, 9, 13, 0.98);
+        backdrop-filter: blur(24px);
         flex-direction: column;
         justify-content: flex-start;
         padding: 40px 24px;
         gap: 24px;
         transform: translateX(100%);
         transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        border-top: 1px solid var(--titanium-border);
       }
-      .nav-links a { font-size: 1.15rem; font-weight: 600; }
+      .nav-links a { font-size: 1.2rem; }
       .menu-toggle:checked ~ nav .nav-links { transform: translateX(0); }
       .menu-toggle:checked ~ .hamburger span:nth-child(1) { transform: translateY(8px) rotate(45deg); }
       .menu-toggle:checked ~ .hamburger span:nth-child(2) { opacity: 0; }
       .menu-toggle:checked ~ .hamburger span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); }
     }
 
-    /* ========== HERO SECTION (SPLIT VIEW) ========== */
+    /* ========== HERO SECTION (COCKPIT SPLIT) ========== */
     .hero {
-      padding: 72px 0 64px;
+      padding: 72px 0 56px;
     }
 
     .hero-split {
@@ -372,7 +440,7 @@
 
     .hero-badges-wrapper {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
       margin-bottom: 24px;
     }
@@ -382,26 +450,20 @@
       align-items: center;
       gap: 8px;
       padding: 6px 14px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      border-radius: 9999px;
-      backdrop-filter: blur(8px);
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-radius: 4px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.4) 100%), #101622;
+      border: 1px solid var(--titanium-border);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
     }
-    .pill-badge.green {
-      background: var(--emerald-glow);
-      border: 1px solid rgba(52, 211, 153, 0.35);
-      color: var(--emerald-400);
-    }
-    .pill-badge.cyan {
-      background: var(--cyan-glow);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      color: var(--cyan-400);
-    }
-    .pill-badge.purple {
-      background: rgba(192, 132, 252, 0.15);
-      border: 1px solid rgba(192, 132, 252, 0.35);
-      color: var(--purple-400);
-    }
+    .pill-badge.cyan { border-color: rgba(0, 210, 255, 0.5); color: var(--racing-cyan); text-shadow: 0 0 8px var(--racing-cyan-glow); }
+    .pill-badge.green { border-color: rgba(0, 230, 118, 0.5); color: var(--racing-green); text-shadow: 0 0 8px var(--racing-green-glow); }
+    .pill-badge.amber { border-color: rgba(255, 157, 0, 0.5); color: var(--racing-amber); text-shadow: 0 0 8px var(--racing-amber-glow); }
+
     .pill-dot {
       width: 7px;
       height: 7px;
@@ -411,24 +473,27 @@
     }
 
     .hero h1 {
-      font-size: clamp(2.4rem, 4.2vw, 3.6rem);
-      font-weight: 800;
-      letter-spacing: -0.04em;
-      line-height: 1.1;
-      margin-bottom: 24px;
+      font-family: var(--font-display);
+      font-size: clamp(2.4rem, 4.2vw, 3.8rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.08;
+      margin-bottom: 20px;
+      text-transform: uppercase;
       color: #fff;
     }
 
     .hero-gradient-text {
-      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+      background: linear-gradient(135deg, #ffffff 0%, #00d2ff 50%, #818cf8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      text-shadow: 0 0 30px rgba(0, 210, 255, 0.3);
     }
 
     .hero-subtitle {
       font-size: 1.12rem;
-      color: var(--text-secondary);
+      color: var(--text-silver);
       line-height: 1.65;
       margin-bottom: 36px;
       max-width: 580px;
@@ -444,96 +509,159 @@
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      padding: 12px 24px;
-      font-size: 0.94rem;
+      padding: 14px 28px;
+      font-family: var(--font-display);
+      font-size: 1rem;
       font-weight: 700;
-      border-radius: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border-radius: 6px;
       text-decoration: none;
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       cursor: pointer;
       border: none;
     }
 
+    /* Botão Start Engine / Ignição */
     .btn-primary {
-      background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
-      color: #020617;
-      box-shadow: 0 0 24px rgba(56, 189, 248, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+      background: 
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.4) 0%, transparent 60%),
+        linear-gradient(180deg, #00d2ff 0%, #0077b6 100%);
+      color: #040810;
+      border: 1px solid #70e000;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: 
+        inset 0 1px 1px #fff,
+        0 0 24px var(--racing-cyan-glow),
+        0 8px 20px rgba(0, 0, 0, 0.6);
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
     }
     .btn-primary:hover {
-      box-shadow: 0 0 36px rgba(56, 189, 248, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+      box-shadow: 
+        inset 0 1px 2px #fff,
+        0 0 36px rgba(0, 210, 255, 0.8),
+        0 10px 24px rgba(0, 0, 0, 0.8);
       transform: translateY(-2px);
     }
 
     .btn-secondary {
-      background: rgba(15, 23, 42, 0.8);
+      background: 
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.4) 100%),
+        #121926;
       color: var(--text-main);
-      border: 1px solid var(--border-subtle);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--titanium-border);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 8px 20px rgba(0, 0, 0, 0.5);
     }
     .btn-secondary:hover {
-      background: rgba(30, 41, 59, 0.9);
-      border-color: var(--border-medium);
+      background: #1c2638;
+      border-color: var(--racing-cyan);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 20px var(--racing-cyan-glow);
       transform: translateY(-2px);
     }
 
-    /* Simulated Live CLI Terminal Mockup */
-    .terminal-window {
-      background: #060912;
-      border: 1px solid var(--border-medium);
+    /* ========== PAINEL DE TELEMETRIA ECU / TERMINAL DE COCKPIT ========== */
+    .ecu-dashboard {
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, transparent 40%),
+        repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.55) 0, rgba(0, 0, 0, 0.55) 2px, transparent 2px, transparent 4px),
+        repeating-linear-gradient(-45deg, rgba(16, 22, 34, 0.9) 0, rgba(16, 22, 34, 0.9) 2px, #07090e 2px, #07090e 4px);
+      border: 1px solid var(--titanium-border);
       border-radius: 14px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(56, 189, 248, 0.1);
+      box-shadow: 
+        inset 0 1px 2px var(--titanium-bevel),
+        0 24px 60px rgba(0, 0, 0, 0.9),
+        0 0 30px rgba(0, 210, 255, 0.15);
       overflow: hidden;
       font-family: var(--font-mono);
-      font-size: 0.82rem;
+      position: relative;
     }
 
-    .terminal-header {
-      background: #0d1322;
-      padding: 12px 16px;
+    /* Shift Lights (LEDs de Rotação/Carga Motorsport no topo) */
+    .shift-lights-bar {
+      background: #06080d;
+      padding: 8px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }
 
-    .terminal-controls {
+    .shift-leds-group {
       display: flex;
-      gap: 8px;
+      gap: 6px;
+      align-items: center;
     }
-    .term-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-    .term-dot.red { background: #ef4444; }
-    .term-dot.yellow { background: #f59e0b; }
-    .term-dot.green { background: #10b981; }
 
-    .terminal-title {
+    .shift-led {
+      width: 14px;
+      height: 6px;
+      border-radius: 2px;
+      background: #1a2230;
+    }
+    .shift-led.green { background: #00e676; box-shadow: 0 0 8px #00e676; }
+    .shift-led.amber { background: #ff9d00; box-shadow: 0 0 8px #ff9d00; }
+    .shift-led.red { background: #ff2a4b; box-shadow: 0 0 8px #ff2a4b; }
+    .shift-led.cyan { background: #00d2ff; box-shadow: 0 0 8px #00d2ff; }
+
+    .ecu-title {
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-silver);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .ecu-telemetry-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: rgba(0, 0, 0, 0.6);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 10px 16px;
+      gap: 12px;
+    }
+
+    .telemetry-cell {
+      display: flex;
+      flex-direction: column;
+    }
+    .telemetry-label {
+      font-size: 0.68rem;
       color: var(--text-muted);
-      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-family: var(--font-display);
       font-weight: 600;
     }
+    .telemetry-val {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--racing-cyan);
+      text-shadow: 0 0 10px var(--racing-cyan-glow);
+    }
+    .telemetry-val.green { color: var(--racing-green); text-shadow: 0 0 10px var(--racing-green-glow); }
+    .telemetry-val.amber { color: var(--racing-amber); text-shadow: 0 0 10px var(--racing-amber-glow); }
 
-    .terminal-body {
-      padding: 18px 20px;
-      line-height: 1.65;
+    .ecu-log-body {
+      padding: 16px 20px;
+      font-size: 0.82rem;
+      line-height: 1.6;
       color: #cbd5e1;
-      max-height: 380px;
+      max-height: 260px;
       overflow-y: auto;
+      background: rgba(5, 7, 11, 0.85);
     }
 
-    .term-prompt { color: var(--cyan-400); font-weight: 700; }
+    .term-prompt { color: var(--racing-cyan); font-weight: 700; }
     .term-cmd { color: #fff; font-weight: 600; }
-    .term-info { color: #64748b; }
-    .term-success { color: var(--emerald-400); }
-    .term-warn { color: var(--amber-400); }
+    .term-info { color: #7888a0; }
+    .term-success { color: var(--racing-green); font-weight: 600; }
     .term-highlight { color: #a5b4fc; font-weight: 600; }
     .term-cursor {
       display: inline-block;
       width: 7px;
       height: 14px;
-      background: var(--cyan-400);
+      background: var(--racing-cyan);
       vertical-align: middle;
       animation: blink 1s infinite;
     }
@@ -546,7 +674,7 @@
       }
     }
 
-    /* ========== STATS STRIP ========== */
+    /* ========== STATS STRIP / GAUGES DE COMPETIÇÃO ========== */
     .stats-strip {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -555,13 +683,15 @@
     }
 
     .stat-box {
-      background: var(--bg-card);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 40%),
+        repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.4) 0, rgba(0, 0, 0, 0.4) 2px, transparent 2px, transparent 4px),
+        #0e131d;
+      border: 1px solid var(--titanium-border);
+      border-radius: 10px;
       padding: 24px;
       position: relative;
-      overflow: hidden;
+      box-shadow: inset 0 1px 0 var(--titanium-bevel), 0 12px 28px rgba(0, 0, 0, 0.6);
       transition: all 0.25s ease;
     }
     .stat-box::before {
@@ -571,44 +701,57 @@
       left: 0;
       right: 0;
       height: 2px;
-      background: linear-gradient(90deg, transparent, var(--cyan-400), transparent);
+      background: linear-gradient(90deg, transparent, var(--racing-cyan), transparent);
       opacity: 0;
       transition: opacity 0.3s ease;
     }
     .stat-box:hover {
-      border-color: var(--border-medium);
+      border-color: var(--racing-cyan);
       transform: translateY(-3px);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+      box-shadow: inset 0 1px 0 var(--titanium-bevel), 0 16px 36px rgba(0, 0, 0, 0.8), 0 0 20px var(--racing-cyan-glow);
     }
     .stat-box:hover::before { opacity: 1; }
 
     .stat-number {
-      font-family: var(--font-mono);
-      font-size: 2rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      margin-bottom: 6px;
+      font-family: var(--font-display);
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin-bottom: 4px;
     }
-    .stat-number.cyan { color: var(--cyan-400); text-shadow: 0 0 20px rgba(56, 189, 248, 0.4); }
-    .stat-number.green { color: var(--emerald-400); text-shadow: 0 0 20px rgba(52, 211, 153, 0.4); }
-    .stat-number.indigo { color: var(--indigo-400); text-shadow: 0 0 20px rgba(129, 140, 248, 0.4); }
-    .stat-number.amber { color: var(--amber-400); text-shadow: 0 0 20px rgba(251, 191, 36, 0.4); }
+    .stat-number.cyan { color: var(--racing-cyan); text-shadow: 0 0 16px var(--racing-cyan-glow); }
+    .stat-number.green { color: var(--racing-green); text-shadow: 0 0 16px var(--racing-green-glow); }
+    .stat-number.amber { color: var(--racing-amber); text-shadow: 0 0 16px var(--racing-amber-glow); }
+    .stat-number.silver { color: #f1f5f9; text-shadow: 0 0 16px rgba(255, 255, 255, 0.3); }
 
     .stat-title {
-      font-size: 0.95rem;
-      font-weight: 600;
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
       color: #fff;
       margin-bottom: 4px;
     }
     .stat-desc {
-      font-size: 0.82rem;
+      font-size: 0.84rem;
       color: var(--text-muted);
     }
 
-    /* ========== SECTION HEADERS ========== */
+    /* ========== PINSTRIPES / SEÇÕES ========== */
     section {
       padding: 72px 0;
       position: relative;
+    }
+
+    section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 5%;
+      right: 5%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(0, 210, 255, 0.4), rgba(255, 255, 255, 0.1), transparent);
     }
 
     .section-header {
@@ -625,31 +768,34 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
+      font-family: var(--font-display);
+      font-size: 0.85rem;
       font-weight: 700;
-      color: var(--cyan-400);
+      color: var(--racing-cyan);
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.12em;
       margin-bottom: 12px;
+      text-shadow: 0 0 10px var(--racing-cyan-glow);
     }
 
     .section-title {
-      font-size: clamp(1.8rem, 3.2vw, 2.4rem);
-      font-weight: 800;
-      letter-spacing: -0.03em;
+      font-family: var(--font-display);
+      font-size: clamp(1.8rem, 3.2vw, 2.5rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      text-transform: uppercase;
       color: #fff;
-      line-height: 1.2;
+      line-height: 1.15;
     }
 
     .section-desc {
-      color: var(--text-secondary);
+      color: var(--text-silver);
       font-size: 1.05rem;
       margin-top: 12px;
       line-height: 1.6;
     }
 
-    /* ========== FEATURE CARDS ========== */
+    /* ========== GRID DE CARDS AUTOMOTIVOS ========== */
     .grid-3 {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -657,44 +803,52 @@
     }
 
     .feature-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--border-subtle);
-      border-radius: 14px;
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 40%),
+        repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.4) 0, rgba(0, 0, 0, 0.4) 2px, transparent 2px, transparent 4px),
+        #0e131d;
+      border: 1px solid var(--titanium-border);
+      border-radius: 12px;
       padding: 32px 28px;
       transition: all 0.25s ease;
       position: relative;
+      box-shadow: inset 0 1px 0 var(--titanium-bevel), 0 16px 36px rgba(0, 0, 0, 0.7);
     }
     .feature-card:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--border-medium);
+      border-color: var(--racing-cyan);
       transform: translateY(-4px);
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+      box-shadow: inset 0 1px 0 var(--titanium-bevel), 0 20px 48px rgba(0, 0, 0, 0.9), 0 0 24px var(--racing-cyan-glow);
     }
 
     .feature-icon-wrapper {
       width: 48px;
       height: 48px;
-      border-radius: 12px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 20px;
-      font-size: 1.3rem;
+      font-size: 1.4rem;
+      background: #141c2b;
+      border: 1px solid var(--titanium-border);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
     }
-    .feature-icon-wrapper.cyan { background: var(--cyan-glow); color: var(--cyan-400); border: 1px solid rgba(56, 189, 248, 0.3); }
-    .feature-icon-wrapper.green { background: var(--emerald-glow); color: var(--emerald-400); border: 1px solid rgba(52, 211, 153, 0.3); }
-    .feature-icon-wrapper.purple { background: rgba(192, 132, 252, 0.15); color: var(--purple-400); border: 1px solid rgba(192, 132, 252, 0.3); }
+    .feature-icon-wrapper.cyan { border-color: var(--racing-cyan); color: var(--racing-cyan); box-shadow: 0 0 16px var(--racing-cyan-glow); }
+    .feature-icon-wrapper.green { border-color: var(--racing-green); color: var(--racing-green); box-shadow: 0 0 16px var(--racing-green-glow); }
+    .feature-icon-wrapper.amber { border-color: var(--racing-amber); color: var(--racing-amber); box-shadow: 0 0 16px var(--racing-amber-glow); }
 
     .feature-card h3 {
-      font-size: 1.25rem;
+      font-family: var(--font-display);
+      font-size: 1.3rem;
       font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
       color: #fff;
       margin-bottom: 12px;
     }
     .feature-card p {
       font-size: 0.94rem;
-      color: var(--text-secondary);
+      color: var(--text-silver);
       line-height: 1.6;
     }
     .feature-card ul {
@@ -705,13 +859,18 @@
     }
     .feature-card li { margin-bottom: 8px; }
 
-    /* ========== ARCHITECTURE DIAGRAM SECTION ========== */
+    /* ========== DIAGRAMA EM FIBRA DE CARBONO ========== */
     .architecture-frame {
-      background: #060a12;
-      border: 1px solid var(--border-medium);
+      background: 
+        radial-gradient(circle at 50% 0%, rgba(0, 210, 255, 0.08) 0%, transparent 70%),
+        #06080e;
+      border: 1px solid var(--titanium-border);
       border-radius: 16px;
       padding: 32px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+      box-shadow: 
+        inset 0 1px 2px var(--titanium-bevel),
+        0 24px 60px rgba(0, 0, 0, 0.9),
+        0 0 30px rgba(0, 210, 255, 0.1);
       text-align: center;
       margin-top: 36px;
       position: relative;
@@ -722,31 +881,7 @@
       border-radius: 8px;
     }
 
-    /* ========== INTERACTIVE INVARIANTS EXPLORER ========== */
-    .invariants-filter-bar {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 28px;
-    }
-    .inv-filter-btn {
-      padding: 8px 16px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      color: var(--text-secondary);
-      font-family: var(--font-sans);
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .inv-filter-btn:hover, .inv-filter-btn.active {
-      background: rgba(56, 189, 248, 0.12);
-      border-color: var(--cyan-400);
-      color: #fff;
-    }
-
+    /* ========== 13 INVARIANTES FORMATION ========== */
     .invariants-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -754,15 +889,19 @@
     }
 
     .inv-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 10px;
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 40%),
+        #0d121c;
+      border: 1px solid var(--titanium-border);
+      border-radius: 8px;
       padding: 20px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
       transition: all 0.2s ease;
     }
     .inv-card:hover {
-      border-color: var(--border-medium);
-      background: var(--bg-card-hover);
+      border-color: var(--racing-cyan);
+      background: #131a28;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 16px var(--racing-cyan-glow);
       transform: translateY(-2px);
     }
     .inv-top {
@@ -772,143 +911,159 @@
       margin-bottom: 8px;
     }
     .inv-badge {
-      font-family: var(--font-mono);
-      font-weight: 800;
-      font-size: 0.85rem;
-      color: var(--cyan-400);
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--racing-cyan);
+      letter-spacing: 0.05em;
     }
     .inv-tag {
+      font-family: var(--font-display);
       font-size: 0.72rem;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
       padding: 2px 8px;
       border-radius: 4px;
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-muted);
+      background: #1a2334;
+      color: var(--text-silver);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
     .inv-name {
-      font-size: 1rem;
+      font-family: var(--font-display);
+      font-size: 1.05rem;
       font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
       color: #fff;
       margin-bottom: 6px;
     }
     .inv-desc {
       font-size: 0.86rem;
-      color: var(--text-secondary);
+      color: var(--text-silver);
       line-height: 1.5;
     }
 
-    /* ========== INTERACTIVE CODE TABS ========== */
+    /* ========== CODE TABS / INSTRUMENTAÇÃO ========== */
     .code-tabs-container {
-      background: #060912;
-      border: 1px solid var(--border-medium);
-      border-radius: 14px;
+      background: #060910;
+      border: 1px solid var(--titanium-border);
+      border-radius: 12px;
       overflow: hidden;
       margin-top: 24px;
-      box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+      box-shadow: inset 0 1px 1px var(--titanium-bevel), 0 20px 40px rgba(0,0,0,0.8);
     }
     .code-tabs-header {
-      background: #0b1120;
+      background: #0d121c;
       display: flex;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       overflow-x: auto;
     }
     .code-tab-btn {
-      padding: 12px 20px;
+      padding: 14px 22px;
       background: transparent;
       border: none;
       border-bottom: 2px solid transparent;
       color: var(--text-muted);
-      font-family: var(--font-mono);
-      font-size: 0.84rem;
-      font-weight: 600;
+      font-family: var(--font-display);
+      font-size: 0.92rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
       cursor: pointer;
       white-space: nowrap;
       transition: all 0.15s ease;
     }
     .code-tab-btn:hover { color: #fff; }
     .code-tab-btn.active {
-      color: var(--cyan-400);
-      border-bottom-color: var(--cyan-400);
-      background: rgba(56, 189, 248, 0.04);
+      color: var(--racing-cyan);
+      border-bottom-color: var(--racing-cyan);
+      background: rgba(0, 210, 255, 0.06);
+      text-shadow: 0 0 10px var(--racing-cyan-glow);
     }
     .code-snippet-panel {
       display: none;
       padding: 24px;
       overflow-x: auto;
+      background: #060910;
     }
     .code-snippet-panel.active { display: block; }
     .code-snippet-panel pre {
       font-family: var(--font-mono);
       font-size: 0.88rem;
-      line-height: 1.6;
+      line-height: 1.65;
       color: #e2e8f0;
     }
 
-    .k-kw { color: #f43f5e; font-weight: 600; }
-    .k-type { color: #38bdf8; font-weight: 600; }
-    .k-fn { color: #818cf8; }
-    .k-str { color: #34d399; }
-    .k-num { color: #fbbf24; }
+    .k-kw { color: #ff2a4b; font-weight: 700; }
+    .k-type { color: var(--racing-cyan); font-weight: 600; }
+    .k-fn { color: #818cf8; font-weight: 600; }
+    .k-str { color: var(--racing-green); }
+    .k-num { color: var(--racing-amber); }
     .k-cmt { color: #64748b; font-style: italic; }
 
-    /* ========== ROADMAP TIMELINE ========== */
+    /* ========== TIMELINE / ROADMAP DE COMPETIÇÃO ========== */
     .timeline {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 18px;
       margin-top: 36px;
     }
     .timeline-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 40%),
+        #0d121c;
+      border: 1px solid var(--titanium-border);
+      border-radius: 10px;
       padding: 24px;
       display: grid;
       grid-template-columns: 80px 1fr 160px;
       align-items: center;
       gap: 24px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
       transition: all 0.2s ease;
     }
     .timeline-card:hover {
-      border-color: var(--border-medium);
-      background: var(--bg-card-hover);
+      border-color: var(--titanium-bevel);
+      background: #131a28;
     }
     .timeline-card.active {
-      border-color: var(--cyan-400);
-      background: rgba(14, 165, 233, 0.08);
-      box-shadow: 0 0 30px rgba(56, 189, 248, 0.12);
+      border-color: var(--racing-cyan);
+      background: linear-gradient(90deg, rgba(0, 210, 255, 0.1) 0%, rgba(13, 18, 28, 0.9) 100%);
+      box-shadow: inset 0 1px 0 var(--titanium-bevel), 0 0 30px var(--racing-cyan-glow);
     }
     .phase-badge {
-      font-family: var(--font-mono);
-      font-weight: 800;
-      font-size: 1.2rem;
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.3rem;
       color: #fff;
       display: flex;
       align-items: center;
       justify-content: center;
       width: 56px;
       height: 56px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      background: #141c2a;
+      border: 1px solid var(--titanium-border);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
     }
-    .timeline-card.done .phase-badge { background: var(--emerald-glow); border-color: rgba(52, 211, 153, 0.4); color: var(--emerald-400); }
-    .timeline-card.active .phase-badge { background: var(--cyan-glow); border-color: rgba(56, 189, 248, 0.6); color: var(--cyan-400); animation: pulse-phase 2s infinite; }
+    .timeline-card.done .phase-badge { border-color: var(--racing-green); color: var(--racing-green); box-shadow: 0 0 16px var(--racing-green-glow); }
+    .timeline-card.active .phase-badge { border-color: var(--racing-cyan); color: var(--racing-cyan); box-shadow: 0 0 20px var(--racing-cyan-glow); animation: pulse-phase 2s infinite; }
     
-    @keyframes pulse-phase { 0%,100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); } 50% { box-shadow: 0 0 0 8px rgba(56, 189, 248, 0); } }
+    @keyframes pulse-phase { 0%,100% { box-shadow: 0 0 10px var(--racing-cyan-glow); } 50% { box-shadow: 0 0 24px rgba(0, 210, 255, 0.8); } }
 
-    .timeline-info h3 { font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
-    .timeline-info p { font-size: 0.9rem; color: var(--text-secondary); }
+    .timeline-info h3 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; text-transform: uppercase; color: #fff; margin-bottom: 4px; }
+    .timeline-info p { font-size: 0.9rem; color: var(--text-silver); }
     
     .timeline-status {
       text-align: right;
-      font-family: var(--font-mono);
-      font-size: 0.82rem;
-      font-weight: 600;
+      font-family: var(--font-display);
+      font-size: 0.88rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
     }
-    .status-done { color: var(--emerald-400); }
-    .status-active { color: var(--cyan-400); }
+    .status-done { color: var(--racing-green); text-shadow: 0 0 8px var(--racing-green-glow); }
+    .status-active { color: var(--racing-cyan); text-shadow: 0 0 8px var(--racing-cyan-glow); }
     .status-pending { color: var(--text-muted); }
 
     @media (max-width: 768px) {
@@ -916,7 +1071,7 @@
       .timeline-status { text-align: left; }
     }
 
-    /* ========== FAQ SECTION ========== */
+    /* ========== FAQ EM FIBRA DE CARBONO ========== */
     .faq-wrapper {
       max-width: 860px;
       margin: 0 auto;
@@ -925,18 +1080,24 @@
       gap: 16px;
     }
     .faq-accordion {
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
+      background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, transparent 40%),
+        #0d121c;
+      border: 1px solid var(--titanium-border);
+      border-radius: 10px;
       overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
       transition: all 0.2s ease;
     }
-    .faq-accordion:hover { border-color: var(--border-medium); }
+    .faq-accordion:hover { border-color: var(--racing-cyan); }
     .faq-accordion summary {
       padding: 20px 24px;
       cursor: pointer;
-      font-size: 1.05rem;
+      font-family: var(--font-display);
+      font-size: 1.1rem;
       font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
       color: #fff;
       display: flex;
       justify-content: space-between;
@@ -946,20 +1107,20 @@
     .faq-accordion summary::-webkit-details-marker { display: none; }
     .faq-accordion summary::after {
       content: "+";
-      font-family: var(--font-mono);
+      font-family: var(--font-display);
       font-size: 1.4rem;
-      color: var(--cyan-400);
+      color: var(--racing-cyan);
       transition: transform 0.2s;
     }
     .faq-accordion[open] summary::after { content: "−"; }
     .faq-content {
       padding: 0 24px 24px;
       font-size: 0.95rem;
-      color: var(--text-secondary);
+      color: var(--text-silver);
       line-height: 1.65;
     }
 
-    /* ========== TECH STACK PILLS ========== */
+    /* ========== QUICK START TERMINAL ========== */
     .tech-strip {
       display: flex;
       flex-wrap: wrap;
@@ -972,26 +1133,31 @@
       align-items: center;
       gap: 8px;
       padding: 10px 18px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-subtle);
-      border-radius: 10px;
-      font-size: 0.9rem;
-      font-weight: 600;
+      background: #0e1420;
+      border: 1px solid var(--titanium-border);
+      border-radius: 6px;
+      font-family: var(--font-display);
+      font-size: 0.92rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
       color: var(--text-main);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
       transition: all 0.2s ease;
     }
     .tech-badge:hover {
-      border-color: var(--border-medium);
+      border-color: var(--racing-cyan);
       transform: translateY(-2px);
-      background: var(--bg-card-hover);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 0 16px var(--racing-cyan-glow);
     }
     .tech-dot { width: 8px; height: 8px; border-radius: 50%; }
 
-    /* ========== FOOTER ========== */
+    /* ========== FOOTER TITANIUM ========== */
     footer {
-      border-top: 1px solid var(--border-subtle);
+      border-top: 1px solid var(--titanium-border);
       padding: 64px 0 36px;
-      background: rgba(2, 6, 12, 0.95);
+      background: #05070a;
+      box-shadow: inset 0 20px 40px rgba(0, 0, 0, 0.9);
     }
     .footer-grid {
       display: grid;
@@ -1000,18 +1166,23 @@
       margin-bottom: 48px;
     }
     .footer-brand-title {
-      font-size: 1.2rem;
-      font-weight: 800;
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
       color: #fff;
       margin-bottom: 12px;
     }
     .footer-col h4 {
-      font-size: 0.85rem;
+      font-family: var(--font-display);
+      font-size: 0.9rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: #fff;
+      color: var(--racing-cyan);
       margin-bottom: 16px;
+      text-shadow: 0 0 8px var(--racing-cyan-glow);
     }
     .footer-col ul { list-style: none; }
     .footer-col li { margin-bottom: 10px; }
@@ -1021,10 +1192,10 @@
       font-size: 0.9rem;
       transition: color 0.15s ease;
     }
-    .footer-col a:hover { color: var(--cyan-400); }
+    .footer-col a:hover { color: #fff; }
 
     .footer-bottom {
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
       padding-top: 24px;
       display: flex;
       justify-content: space-between;
@@ -1052,7 +1223,7 @@
   <header role="banner">
     <div class="container nav-bar">
       <a href="#" class="brand" aria-label="Motor de Renda Variável — Página Inicial">
-        <div class="brand-logo-gem">
+        <div class="brand-logo-shield">
           <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </div>
         <span>Motor de Renda Variável</span>
@@ -1086,14 +1257,14 @@
   <!-- Main Content -->
   <main id="conteudo-principal" role="main">
 
-    <!-- Hero Section (Split View com Terminal) -->
+    <!-- Hero Section (Split View com Painel de Telemetria ECU) -->
     <div class="container hero">
       <div class="hero-split">
         <div>
           <div class="hero-badges-wrapper">
-            <span class="pill-badge green"><span class="pill-dot"></span> 18/18 Testes &amp; 13 Invariantes em CI</span>
+            <span class="pill-badge green"><span class="pill-dot"></span> 18/18 Testes &amp; 13 Invariantes</span>
             <span class="pill-badge cyan"><span class="pill-dot"></span> io_uring Group Commit</span>
-            <span class="pill-badge purple"><span class="pill-dot"></span> 28 ADRs Fechadas</span>
+            <span class="pill-badge amber"><span class="pill-dot"></span> 28 ADRs de Engenharia</span>
           </div>
           <h1>
             Motor de Pós-Negociação<br>
@@ -1114,54 +1285,75 @@
           </div>
         </div>
 
-        <!-- Terminal Interativo Simulado -->
-        <div class="terminal-window">
-          <div class="terminal-header">
-            <div class="terminal-controls">
-              <span class="term-dot red"></span>
-              <span class="term-dot yellow"></span>
-              <span class="term-dot green"></span>
+        <!-- Painel de Telemetria Motorsport / ECU Dashboard -->
+        <div class="ecu-dashboard titanium-bolts">
+          <div class="shift-lights-bar">
+            <div class="shift-leds-group">
+              <span class="shift-led green"></span>
+              <span class="shift-led green"></span>
+              <span class="shift-led amber"></span>
+              <span class="shift-led amber"></span>
+              <span class="shift-led red"></span>
+              <span class="shift-led red"></span>
+              <span class="shift-led cyan"></span>
             </div>
-            <div class="terminal-title">motor-rv — single-writer daemon</div>
-            <span style="font-size: 0.7rem; color: #10b981; font-weight: 700;">● LIVE</span>
+            <div class="ecu-title">ECU Telemetry :: Core Daemon</div>
+            <span style="font-size: 0.75rem; color: var(--racing-green); font-weight: 700; font-family: var(--font-display);">● REAL-TIME</span>
           </div>
-          <div class="terminal-body">
+
+          <!-- Gauges Digitais Supercar -->
+          <div class="ecu-telemetry-grid">
+            <div class="telemetry-cell">
+              <span class="telemetry-label">Ingress Throughput</span>
+              <span class="telemetry-val">124.8M ops/s</span>
+            </div>
+            <div class="telemetry-cell">
+              <span class="telemetry-label">WAL Commit P99</span>
+              <span class="telemetry-val green">12.4 µs</span>
+            </div>
+            <div class="telemetry-cell">
+              <span class="telemetry-label">Memory Allocations</span>
+              <span class="telemetry-val amber">0 (Sealed)</span>
+            </div>
+          </div>
+
+          <!-- Log de Telemetria do Motor -->
+          <div class="ecu-log-body">
             <div><span class="term-prompt">kaeyo@omarchy:~$</span> <span class="term-cmd">./motor-rv --particoes 4 --metrics-port 9100 --servir</span></div>
-            <div class="term-info">[2026-09-11 16:50:00.102] [core] ISA detectado: x86-64-v2 (AVX2/CRC32C ativo)</div>
-            <div class="term-info">[2026-09-11 16:50:00.105] [wal] backend: io_uring (SINGLE_ISSUER | DEFER_TASKRUN)</div>
-            <div class="term-info">[2026-09-11 16:50:00.110] [mem] 4 arenas pré-alocadas (256 MiB cada) seladas pós warm-up</div>
-            <div class="term-success">[2026-09-11 16:50:00.114] [edge] HTTP observability exportador ouvindo em :9100</div>
+            <div class="term-info">[2026-09-11 17:50:00.102] [core] ISA: x86-64-v2 (AVX2 / HW CRC32C ativo)</div>
+            <div class="term-info">[2026-09-11 17:50:00.105] [wal] backend: io_uring (SINGLE_ISSUER | DEFER_TASKRUN)</div>
+            <div class="term-info">[2026-09-11 17:50:00.110] [mem] 4 arenas de 256 MiB seladas no warm-up</div>
+            <div class="term-success">[2026-09-11 17:50:00.114] [edge] HTTP observability exportador ouvindo em :9100</div>
             <div><span class="term-highlight">&gt;&gt;&gt; Ingress pipeline ativo:</span> <span class="term-success">124.8M ops/s</span> (SBE framing)</div>
-            <div><span class="term-highlight">&gt;&gt;&gt; Partição 0:</span> LSN durável: <span class="term-cyan">0x000F892A</span> | Custódia Checksum: <span class="term-cyan">0x89AC21D0</span></div>
+            <div><span class="term-highlight">&gt;&gt;&gt; Partição 0:</span> LSN durável: <span class="term-prompt">0x000F892A</span> | Checksum: <span class="term-prompt">0x89AC21D0</span></div>
             <div><span class="term-highlight">&gt;&gt;&gt; Invariantes I1–I13:</span> <span class="term-success">100% OK (zero desvios contábeis)</span></div>
-            <div><span class="term-highlight">&gt;&gt;&gt; Latência p99 WAL commit:</span> <span class="term-success">12.4 µs</span></div>
             <div><span class="term-prompt">kaeyo@omarchy:~$</span> <span class="term-cursor"></span></div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Stats Strip -->
+    <!-- Stats Gauges Strip -->
     <div class="container">
       <div class="stats-strip">
-        <div class="stat-box">
+        <div class="stat-box titanium-bolts">
           <div class="stat-number cyan">&gt; 120M ops/s</div>
-          <div class="stat-title">Vazão de Ingress SBE</div>
-          <div class="stat-desc">Roteamento zero-copy de rede direto para a partição por hash CPF/CNPJ.</div>
+          <div class="stat-title">Vazão Ingress SBE</div>
+          <div class="stat-desc">Roteamento zero-copy de rede direto para a partição dona por hash de CPF/CNPJ.</div>
         </div>
-        <div class="stat-box">
-          <div class="stat-number green">0 alocações</div>
+        <div class="stat-box titanium-bolts">
+          <div class="stat-number green">0 Alocações</div>
           <div class="stat-title">Hot Path Selado</div>
-          <div class="stat-desc">Arenas pré-alocadas e seladas pós warm-up. Zero malloc durante pregão.</div>
+          <div class="stat-desc">Arenas pré-alocadas de 256 MiB seladas pós warm-up. Zero malloc durante pregão.</div>
         </div>
-        <div class="stat-box">
-          <div class="stat-number indigo">13 Invariantes</div>
+        <div class="stat-box titanium-bolts">
+          <div class="stat-number amber">13 Invariantes</div>
           <div class="stat-title">Garantias Formais</div>
           <div class="stat-desc">Regras matemáticas estritas verificadas em CI em tempo de compilação e execução.</div>
         </div>
-        <div class="stat-box">
-          <div class="stat-number amber">28 ADRs</div>
-          <div class="stat-title">Decisões Documentadas</div>
+        <div class="stat-box titanium-bolts">
+          <div class="stat-number silver">28 ADRs</div>
+          <div class="stat-title">Decisões Registradas</div>
           <div class="stat-desc">Cada compromisso de engenharia registrado formalmente antes da implementação.</div>
         </div>
       </div>
@@ -1171,15 +1363,15 @@
     <section id="proposito">
       <div class="container">
         <div class="section-header">
-          <span class="section-tag">Engenharia Financeira</span>
-          <h2 class="section-title">O que é o motor-rv?</h2>
+          <span class="section-tag">Engenharia de Alta Precisão</span>
+          <h2 class="section-title">O que é o Motor de Renda Variável?</h2>
           <p class="section-desc">
             Um motor de alta performance projetado para processar o ciclo completo pós-negociação de renda variável com rigor matemático e conformidade estrita com as normas da B3 e do Banco Central.
           </p>
         </div>
 
         <div class="grid-3">
-          <div class="feature-card">
+          <div class="feature-card titanium-bolts">
             <div class="feature-icon-wrapper cyan">⚡</div>
             <h3>Pós-Negociação da B3</h3>
             <p>
@@ -1192,7 +1384,7 @@
             </ul>
           </div>
 
-          <div class="feature-card">
+          <div class="feature-card titanium-bolts">
             <div class="feature-icon-wrapper green">🛡️</div>
             <h3>Zero Ponto Flutuante</h3>
             <p>
@@ -1205,8 +1397,8 @@
             </ul>
           </div>
 
-          <div class="feature-card">
-            <div class="feature-icon-wrapper purple">🌐</div>
+          <div class="feature-card titanium-bolts">
+            <div class="feature-icon-wrapper amber">🌐</div>
             <h3>Open Finance &amp; FAPI-BR</h3>
             <p>
               Desacoplamento total do núcleo. Acesso de leitura realizado via snapshots D-1 imutáveis em memória mapeada, garantindo conformidade com a API Renda Variável v1.3.0 e segurança FAPI-BR v2.2.1.
@@ -1233,23 +1425,23 @@
         </div>
 
         <div class="grid-3">
-          <div class="feature-card">
+          <div class="feature-card titanium-bolts">
             <h3>1. Ingress &amp; Roteamento</h3>
-            <p>Os bytes SBE da rede chegam por conexão TCP (Drop Copy B3 / UMDF). O framing decodifica o cabeçalho canônico e roteia o evento diretamente para a partição dona da conta via hash do CPF/CNPJ.</p>
+            <p>Bytes SBE chegam por conexão TCP (Drop Copy B3 / UMDF). O framing decodifica o cabeçalho canônico e roteia diretamente para a partição dona da conta via hash de CPF/CNPJ.</p>
           </div>
-          <div class="feature-card">
+          <div class="feature-card titanium-bolts">
             <h3>2. Núcleo Shared-Nothing</h3>
-            <p>Cada partição é um thread exclusivo pinado a um núcleo de CPU com anéis SPSC e arenas de 256 MiB seladas. Sem mutexes, sem contenção entre investidores.</p>
+            <p>Cada partição é um thread exclusivo pinado a um core de CPU com anéis SPSC e arenas de 256 MiB seladas. Sem mutexes, sem contenção entre investidores.</p>
           </div>
-          <div class="feature-card">
+          <div class="feature-card titanium-bolts">
             <h3>3. Persistência Nativa io_uring</h3>
             <p>Gravação assíncrona em disco com flags <code>SINGLE_ISSUER</code> e <code>DEFER_TASKRUN</code> do Linux moderno. Coalescência de commits em janelas de 100 microssegundos.</p>
           </div>
         </div>
 
-        <!-- Diagrama SVG Dark-Native Integrado -->
-        <div class="architecture-frame">
-          <img src="diagrams/arquitetura-dark.svg" alt="Diagrama da Arquitetura Dark do motor-rv em C++23 mostrando Ingress, Núcleo e Borda Open Finance" width="760" height="820" loading="lazy">
+        <!-- Diagrama SVG Dark Integrado -->
+        <div class="architecture-frame titanium-bolts">
+          <img src="diagrams/arquitetura-dark.svg" alt="Diagrama da Arquitetura do Motor de Renda Variável em C++23 mostrando Ingress, Núcleo e Borda Open Finance" width="760" height="820" loading="lazy">
         </div>
       </div>
     </section>
@@ -1346,7 +1538,7 @@
           </p>
         </div>
 
-        <div class="code-tabs-container">
+        <div class="code-tabs-container titanium-bolts">
           <div class="code-tabs-header">
             <button class="code-tab-btn active" onclick="switchTab('tab-fixed')">Ponto Fixo Tipado</button>
             <button class="code-tab-btn" onclick="switchTab('tab-sbe')">Ingress SBE Zero-Copy</button>
@@ -1355,7 +1547,7 @@
           </div>
 
           <div id="tab-fixed" class="code-snippet-panel active">
-<pre><code><span class="k-cmt">// src/base/fixed_point.hpp — Aritmética de precisão absoluta sem float/double</span>
+<pre><code><span class="k-cmt">// src/base/fixed.hpp — Aritmética de precisão absoluta sem float/double</span>
 <span class="k-kw">template</span> &lt;<span class="k-type">typename</span> Rep, <span class="k-type">int</span> Scale&gt;
 <span class="k-kw">struct</span> <span class="k-type">Fixed</span> {
     Rep raw_value{<span class="k-num">0</span>};
@@ -1434,7 +1626,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
         </div>
 
         <div class="timeline">
-          <div class="timeline-card done">
+          <div class="timeline-card done titanium-bolts">
             <div class="phase-badge">F0</div>
             <div class="timeline-info">
               <h3>Fase 0 — Reconhecimento do Terreno</h3>
@@ -1443,7 +1635,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
             <div class="timeline-status status-done">✓ Concluída (02/09/2026)</div>
           </div>
 
-          <div class="timeline-card done">
+          <div class="timeline-card done titanium-bolts">
             <div class="phase-badge">F1</div>
             <div class="timeline-info">
               <h3>Fase 1 — Tipos, SBE &amp; Invariantes</h3>
@@ -1452,7 +1644,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
             <div class="timeline-status status-done">✓ Concluída (02/09/2026)</div>
           </div>
 
-          <div class="timeline-card done">
+          <div class="timeline-card done titanium-bolts">
             <div class="phase-badge">F2</div>
             <div class="timeline-info">
               <h3>Fase 2 — Partição, WAL &amp; Caos</h3>
@@ -1461,7 +1653,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
             <div class="timeline-status status-done">✓ Concluída (11/09/2026)</div>
           </div>
 
-          <div class="timeline-card active">
+          <div class="timeline-card active titanium-bolts">
             <div class="phase-badge">F3</div>
             <div class="timeline-info">
               <h3>Fase 3 — Liquidação D+2 &amp; Eventos Corporativos</h3>
@@ -1470,7 +1662,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
             <div class="timeline-status status-active">● Em Andamento</div>
           </div>
 
-          <div class="timeline-card">
+          <div class="timeline-card titanium-bolts">
             <div class="phase-badge">F4</div>
             <div class="timeline-info">
               <h3>Fase 4 — Snapshot EOD &amp; Resource Server FAPI-BR</h3>
@@ -1479,7 +1671,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
             <div class="timeline-status status-pending">○ Planejada</div>
           </div>
 
-          <div class="timeline-card">
+          <div class="timeline-card titanium-bolts">
             <div class="phase-badge">F5</div>
             <div class="timeline-info">
               <h3>Fase 5 — Conformance Open Finance</h3>
@@ -1552,29 +1744,29 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
           </p>
         </div>
 
-        <div class="terminal-window">
-          <div class="terminal-header">
-            <div class="terminal-controls">
-              <span class="term-dot red"></span>
-              <span class="term-dot yellow"></span>
-              <span class="term-dot green"></span>
+        <div class="ecu-dashboard titanium-bolts">
+          <div class="shift-lights-bar">
+            <div class="shift-leds-group">
+              <span class="shift-led green"></span>
+              <span class="shift-led green"></span>
+              <span class="shift-led green"></span>
             </div>
-            <div class="terminal-title">bash — Linux x86_64</div>
-            <button onclick="navigator.clipboard.writeText('export PATH=&quot;$PWD/.toolchain/bin:$PATH&quot; &amp;&amp; cmake --preset release &amp;&amp; cmake --build --preset release &amp;&amp; ctest --preset release &amp;&amp; ./build/release/src/app/motor-rv --particoes 4 --servir')" style="background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle); color: var(--cyan-400); font-family: var(--font-mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; cursor: pointer;">Copiar Comandos</button>
+            <div class="ecu-title">bash — Linux x86_64</div>
+            <button onclick="navigator.clipboard.writeText('export PATH=&quot;$PWD/.toolchain/bin:$PATH&quot; &amp;&amp; cmake --preset release &amp;&amp; cmake --build --preset release &amp;&amp; ctest --preset release &amp;&amp; ./build/release/src/app/motor-rv --particoes 4 --servir')" style="background: rgba(255,255,255,0.08); border: 1px solid var(--titanium-border); color: var(--racing-cyan); font-family: var(--font-display); font-weight: 700; text-transform: uppercase; font-size: 0.76rem; padding: 3px 10px; border-radius: 4px; cursor: pointer;">Copiar Comandos</button>
           </div>
-          <div class="terminal-body">
-            <div><span class="term-cmt"># 1. Carregar a toolchain isolada (sem necessidade de sudo)</span></div>
+          <div class="ecu-log-body">
+            <div><span class="k-cmt"># 1. Carregar a toolchain isolada (sem necessidade de sudo)</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">./scripts/bootstrap-toolchain.sh</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">export PATH="$PWD/.toolchain/bin:$PATH"</span></div>
             <br>
-            <div><span class="term-cmt"># 2. Compilar em modo release com LTO (-O3 -Werror)</span></div>
+            <div><span class="k-cmt"># 2. Compilar em modo release com LTO (-O3 -Werror)</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">cmake --preset release &amp;&amp; cmake --build --preset release</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">ctest --preset release</span></div>
             <br>
-            <div><span class="term-cmt"># 3. Inicializar o servidor com 4 partições e telemetria HTTP</span></div>
+            <div><span class="k-cmt"># 3. Inicializar o servidor com 4 partições e telemetria HTTP</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">./build/release/src/app/motor-rv --particoes 4 --metrics-port 9100 --servir</span></div>
             <br>
-            <div><span class="term-cmt"># 4. Inspecionar métricas e probes em outro terminal</span></div>
+            <div><span class="k-cmt"># 4. Inspecionar métricas e probes em outro terminal</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">curl http://localhost:9100/healthz</span>   <span class="term-info"># Retorna 200 OK</span></div>
             <div><span class="term-prompt">$</span> <span class="term-cmd">curl http://localhost:9100/metrics</span>   <span class="term-info"># OpenMetrics Prometheus</span></div>
           </div>
@@ -1582,10 +1774,10 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
 
         <!-- Tech Badges -->
         <div class="tech-strip">
-          <div class="tech-badge"><span class="tech-dot" style="background: #38bdf8;"></span>C++23 (GCC 14 / Clang 18)</div>
-          <div class="tech-badge"><span class="tech-dot" style="background: #f59e0b;"></span>Linux io_uring (liburing)</div>
-          <div class="tech-badge"><span class="tech-dot" style="background: #10b981;"></span>SBE Binary Codecs</div>
-          <div class="tech-badge"><span class="tech-dot" style="background: #ef4444;"></span>Prometheus 0.0.4</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: var(--racing-cyan);"></span>C++23 (GCC 14 / Clang 18)</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: var(--racing-amber);"></span>Linux io_uring (liburing)</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: var(--racing-green);"></span>SBE Binary Codecs</div>
+          <div class="tech-badge"><span class="tech-dot" style="background: var(--racing-red);"></span>Prometheus 0.0.4</div>
           <div class="tech-badge"><span class="tech-dot" style="background: #818cf8;"></span>Open Finance FAPI-BR v2.2.1</div>
           <div class="tech-badge"><span class="tech-dot" style="background: #c084fc;"></span>ASan &amp; TSan Sanitizers</div>
         </div>
@@ -1637,7 +1829,7 @@ motor_rv_wal_commit_latency_us_bucket{le="50.0"} 124800</code></pre>
       </div>
 
       <div class="footer-bottom">
-        <div>&copy; 2026 motor-rv — Projeto de Engenharia de Sistemas em C++23. Licença Aberta.</div>
+        <div>&copy; 2026 Motor de Renda Variável — Engenharia de Alta Performance em C++23. Licença Aberta.</div>
         <div>Documentação em Português · Código em Inglês</div>
       </div>
     </div>
